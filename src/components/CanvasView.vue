@@ -515,7 +515,7 @@ async function createNotesFromDrop(
     const note = await appStore.createNote(notePos, undefined, {
       initialText: displayName,
       bodyText: dirPath || undefined,
-      collapsed: !!filePath,
+      collapsed: false,
       link: filePath || undefined,
       startEditing: false,
     })

@@ -506,56 +506,191 @@ async function analyzeFile() {
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    const result = await invoke<string>('run_ffprobe', {
-      path: props.note.link,
-      args: [
-        '-v', 'quiet',
-        '-select_streams', 'v:0',
-        '-show_entries', 'stream=codec_name',
-        '-of', 'csv=p=0',
-      ],
-    })
 
-    const codec = result.trim()
-    if (!codec) {
-      console.warn('No video stream found')
+    // Check file exists first
+    const exists: boolean = await invoke('path_exists', { path: props.note.link })
+    if (!exists) {
+      const before = history.snapshotNote(appStore.notes, props.note.id)!
+      props.note.body.enabled = true
+      props.note.collapsed = false
+      const existingBlocks = props.note.body.content?.content || []
+      existingBlocks.push({
+        type: 'paragraph',
+        content: [{ type: 'text', text: '⚠ File not found — may have been moved or deleted' }],
+      })
+      props.note.body.content = { type: 'doc', content: existingBlocks }
+      appStore.updateNote(props.note)
+      appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
       analyzing.value = false
       return
     }
 
+    const result = await invoke<string>('run_ffprobe', {
+      path: props.note.link,
+      args: [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_format',
+        '-show_streams',
+      ],
+    })
+
+    const probe = JSON.parse(result.trim())
+    const streams: any[] = probe.streams || []
+    const format = probe.format || {}
+
+    const lines: string[] = []
+
+    // File size
+    const bytes = parseInt(format.size || '0', 10)
+    if (bytes > 0) {
+      lines.push(`Size: ${formatFileSize(bytes)}`)
+    }
+
+    // Find first video and audio streams
+    const videoStream = streams.find((s: any) => s.codec_type === 'video' && s.codec_name !== 'mjpeg')
+    const audioStreams = streams.filter((s: any) => s.codec_type === 'audio')
+    const dataStreams = streams.filter((s: any) => s.codec_type === 'data' || s.codec_type === 'subtitle')
+
+    // Video codec
+    if (videoStream) {
+      const res = videoStream.width && videoStream.height ? ` (${videoStream.width}×${videoStream.height})` : ''
+      lines.push(`Video: ${videoStream.codec_name}${res}`)
+    }
+
+    // Audio codec (first stream's codec as summary)
+    if (audioStreams.length > 0) {
+      lines.push(`Audio: ${audioStreams[0].codec_name}`)
+    }
+
+    // Start timecode — check format tags, then video stream tags
+    const startTc = format.tags?.timecode
+      || videoStream?.tags?.timecode
+      || streams.find((s: any) => s.codec_type === 'data' && s.tags?.timecode)?.tags?.timecode
+    if (startTc) {
+      lines.push(`Start TC: ${startTc}`)
+    }
+
+    // Framerate
+    if (videoStream) {
+      const fps = parseFrameRate(videoStream.r_frame_rate || videoStream.avg_frame_rate)
+      if (fps) lines.push(`FPS: ${fps}`)
+    }
+
+    // Audio track list
+    if (audioStreams.length > 0) {
+      lines.push('')
+      lines.push(`Audio tracks (${audioStreams.length}):`)
+      for (let i = 0; i < audioStreams.length; i++) {
+        const a = audioStreams[i]
+        const layout = describeAudioLayout(a)
+        const lang = a.tags?.language && a.tags.language !== 'und' ? ` [${a.tags.language}]` : ''
+        const title = a.tags?.title ? ` — ${a.tags.title}` : ''
+        lines.push(`  ${i + 1}. ${a.codec_name} ${layout}${lang}${title}`)
+      }
+    }
+
+    // Data/metadata tracks
+    if (dataStreams.length > 0) {
+      lines.push('')
+      lines.push(`Metadata tracks (${dataStreams.length}):`)
+      for (let i = 0; i < dataStreams.length; i++) {
+        const d = dataStreams[i]
+        const name = d.tags?.handler_name || d.codec_tag_string || d.codec_name || 'unknown'
+        const tc = d.tags?.timecode ? ` (TC: ${d.tags.timecode})` : ''
+        lines.push(`  ${i + 1}. ${name}${tc}`)
+      }
+    }
+
+    if (lines.length === 0) {
+      lines.push('No media streams found')
+    }
+
     const before = history.snapshotNote(appStore.notes, props.note.id)!
 
-    // Enable body if not already
     props.note.body.enabled = true
     props.note.collapsed = false
 
-    // Get existing body text to preserve directory path
-    const existingText = extractPlainText(props.note.body.content)
-    const lines = existingText ? [existingText] : []
-
-    // Add or update codec line
-    const codecLine = `Codec: ${codec}`
-    const codecIdx = lines.findIndex(l => l.startsWith('Codec:'))
-    if (codecIdx >= 0) {
-      lines[codecIdx] = codecLine
-    } else {
-      lines.push(codecLine)
-    }
+    // Append to existing body content
+    const existingBlocks = props.note.body.content?.content || []
+    const newBlocks = lines.map(line => ({
+      type: 'paragraph',
+      content: line ? [{ type: 'text', text: line }] : [],
+    }))
 
     props.note.body.content = {
       type: 'doc',
-      content: lines.map(line => ({
-        type: 'paragraph',
-        content: line ? [{ type: 'text', text: line }] : [],
-      })),
+      content: [...existingBlocks, ...newBlocks],
     }
 
     appStore.updateNote(props.note)
     appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
   } catch (e: any) {
     console.error('ffprobe failed:', e)
+    // Show error in the note body
+    try {
+      const before = history.snapshotNote(appStore.notes, props.note.id)!
+      props.note.body.enabled = true
+      props.note.collapsed = false
+      const existingBlocks = props.note.body.content?.content || []
+      const msg = String(e).includes('ffprobe') ? '⚠ ffprobe not found — is FFmpeg installed?' : `⚠ Analysis failed: ${e}`
+      existingBlocks.push({
+        type: 'paragraph',
+        content: [{ type: 'text', text: msg }],
+      })
+      props.note.body.content = { type: 'doc', content: existingBlocks }
+      appStore.updateNote(props.note)
+      appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
+    } catch { /* ignore */ }
   }
   analyzing.value = false
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(2)} TB`
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
+function parseFrameRate(rateStr: string): string | null {
+  if (!rateStr) return null
+  const parts = rateStr.split('/')
+  if (parts.length === 2) {
+    const num = parseInt(parts[0], 10)
+    const den = parseInt(parts[1], 10)
+    if (den === 0) return null
+    const fps = num / den
+    // Show common NTSC rates nicely
+    const rounded2 = Math.round(fps * 100) / 100
+    if (Math.abs(fps - Math.round(fps)) < 0.01) return `${Math.round(fps)}`
+    return `${rounded2}`
+  }
+  return rateStr
+}
+
+function describeAudioLayout(stream: any): string {
+  const layout = stream.channel_layout
+  if (layout) {
+    const map: Record<string, string> = {
+      'mono': 'Mono',
+      'stereo': 'Stereo',
+      '5.1': '5.1',
+      '5.1(side)': '5.1',
+      '7.1': '7.1',
+      '7.1(wide)': '7.1',
+      'quad': 'Quad',
+    }
+    return map[layout] || layout
+  }
+  const ch = stream.channels
+  if (ch === 1) return 'Mono'
+  if (ch === 2) return 'Stereo'
+  if (ch === 6) return '5.1'
+  if (ch === 8) return '7.1'
+  if (ch) return `${ch}ch`
+  return ''
 }
 
 function extractPlainText(content: any): string {
