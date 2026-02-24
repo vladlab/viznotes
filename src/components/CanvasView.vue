@@ -517,6 +517,7 @@ async function createNotesFromDrop(
       bodyText: dirPath || undefined,
       collapsed: false,
       link: filePath || undefined,
+      nodeType: 'file',
       startEditing: false,
     })
 

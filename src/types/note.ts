@@ -1,5 +1,34 @@
 import type { JSONContent } from '@tiptap/vue-3'
 
+// ── Node types ──
+
+export interface NodeTypeInfo {
+  label: string
+  /** SVG path d-attribute, drawn in a 16x16 viewBox */
+  icon: string
+}
+
+export const NODE_TYPES: Record<string, NodeTypeInfo> = {
+  default: {
+    label: '',
+    icon: '',
+  },
+  note: {
+    label: 'Note',
+    icon: 'M4 2h8l4 4v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 2v4h4 M6 10h8 M6 14h8',
+  },
+  timeline: {
+    label: 'Timeline',
+    icon: 'M12 2v20 M5 6h4 M15 10h4 M5 14h4 M15 18h4',
+  },
+  file: {
+    label: 'File',
+    icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6',
+  },
+} as const
+
+export const NODE_TYPE_KEYS = Object.keys(NODE_TYPES) as (keyof typeof NODE_TYPES)[]
+
 export interface NoteTextSection {
   enabled: boolean
   content: JSONContent
@@ -34,6 +63,7 @@ export interface Note {
   height: string // 'auto' or pixel value
 
   color: NoteColor
+  nodeType: string  // key from NODE_TYPES
   link: string   // page ID, URL, or empty
 
   collapsed: boolean
@@ -81,6 +111,7 @@ export function createDefaultNote(
     height: 'auto',
 
     color: { inherit: false, value: 'grey' },
+    nodeType: 'default',
     link: '',
 
     collapsed: false,

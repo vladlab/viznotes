@@ -308,6 +308,7 @@ async function createNote(
     bodyText?: string;
     collapsed?: boolean;
     link?: string;
+    nodeType?: string;
   }
 ): Promise<Note> {
   if (!currentPage.value) throw new Error('No page loaded')
@@ -352,6 +353,11 @@ async function createNote(
   // Set link
   if (options?.link) {
     note.link = options.link
+  }
+
+  // Set node type
+  if (options?.nodeType) {
+    note.nodeType = options.nodeType
   }
 
   const saved = await storage.saveNote(note)

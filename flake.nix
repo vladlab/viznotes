@@ -39,7 +39,12 @@
 
       in {
         devShells.default = pkgs.mkShell {
-          buildInputs = [ pkgs.nodejs_22 rustToolchain pkgs.cargo-tauri ] ++ tauriDeps;
+          buildInputs = [
+            pkgs.nodejs_22
+            rustToolchain
+            pkgs.cargo-tauri
+            pkgs.patchelf
+          ] ++ tauriDeps;
 
           shellHook = ''
             export LD_LIBRARY_PATH="${libraryPath}:$LD_LIBRARY_PATH"
@@ -59,7 +64,7 @@
             echo "   npm install                # install JS deps (first time)"
             echo "   npm run tauri dev          # run desktop app"
             echo "   npm run dev                # web-only dev server"
-            echo "   npm run tauri build        # build release binary"
+            echo "   ./build-appimage.sh        # build portable AppImage"
           '';
         };
       }

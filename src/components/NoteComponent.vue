@@ -17,6 +17,16 @@
     @contextmenu.prevent.stop="showContextMenu"
   >
     <div class="note-frame" :class="{ 'has-collapse': hasMultipleSections }">
+      <!-- Node type header bar -->
+      <div class="node-type-bar">
+        <template v-if="(NODE_TYPES[note.nodeType || 'default'] || NODE_TYPES.default).label">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path :d="(NODE_TYPES[note.nodeType || 'default'] || NODE_TYPES.default).icon" />
+          </svg>
+          <span class="node-type-label">{{ (NODE_TYPES[note.nodeType || 'default'] || NODE_TYPES.default).label }}</span>
+        </template>
+      </div>
+
       <!-- Collapse toggle -->
       <button
         v-if="hasMultipleSections"
@@ -112,6 +122,25 @@
             @click="setColor(name as string)"
           />
         </div>
+        <div class="context-separator" />
+        <div class="context-submenu">
+          <button @click="toggleTypePicker" class="submenu-trigger">
+            Type: {{ (NODE_TYPES[note.nodeType || 'default'] || NODE_TYPES.default).label || 'Default' }} ▸
+          </button>
+          <div v-if="typePickerVisible" class="submenu-panel type-picker-panel" @pointerdown.stop>
+            <button
+              v-for="key in NODE_TYPE_KEYS"
+              :key="key"
+              :class="{ active: (note.nodeType || 'default') === key }"
+              @click="setNodeType(key)"
+            >
+              <svg v-if="NODE_TYPES[key].icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path :d="NODE_TYPES[key].icon" />
+              </svg>
+              {{ NODE_TYPES[key].label || 'Default' }}
+            </button>
+          </div>
+        </div>
         <button v-if="note.width !== 'auto' || note.height !== 'auto'" @click="resetSize">Reset size</button>
         <div class="context-separator" />
         <template v-if="!isFileLink">
@@ -166,7 +195,7 @@
 <script setup lang="ts">
 import { computed, ref, inject } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
-import { NOTE_COLOR_NAMES, getNoteColor } from '../types/note'
+import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import NoteTextSection from './NoteTextSection.vue'
@@ -302,6 +331,7 @@ function showContextMenu(e: MouseEvent) {
   contextMenuPos.value = { x: e.clientX, y: e.clientY }
   contextMenuVisible.value = true
   pagePickerVisible.value = false
+  typePickerVisible.value = false
 
   const close = (ev: Event) => {
     // Don't close if interacting with elements inside the context menu (except Escape)
@@ -317,6 +347,7 @@ function showContextMenu(e: MouseEvent) {
 
     contextMenuVisible.value = false
     pagePickerVisible.value = false
+    typePickerVisible.value = false
     window.removeEventListener('pointerdown', close, true)
     window.removeEventListener('keydown', close)
   }
@@ -372,6 +403,24 @@ function resetSize() {
 const pagePickerVisible = ref(false)
 const pagePickerSearch = ref('')
 const pagePickerInput = ref<HTMLInputElement | null>(null)
+
+// Node type picker
+const typePickerVisible = ref(false)
+
+function toggleTypePicker() {
+  typePickerVisible.value = !typePickerVisible.value
+}
+
+function setNodeType(typeKey: string) {
+  const before = history.snapshotNote(appStore.notes, props.note.id)!
+  props.note.nodeType = typeKey
+  props.note.updatedAt = Date.now()
+  appStore.updateNote(props.note)
+  const after = history.snapshotNote(appStore.notes, props.note.id)!
+  history.push({ type: 'note-update', before, after })
+  typePickerVisible.value = false
+  contextMenuVisible.value = false
+}
 
 const availablePages = computed(() => {
   return appStore.pageList.value.filter(p => p.id !== appStore.currentPageId.value)
@@ -779,6 +828,36 @@ function extractPlainText(content: any): string {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+/* Node type header bar — Blender-style title strip */
+.node-type-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--note-color) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--note-color) 30%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+  opacity: 0.85;
+  user-select: none;
+  flex-shrink: 0;
+  min-height: 20px;
+}
+
+.node-type-bar svg {
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.node-type-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .note-divider {
   height: 1px;
   background: var(--note-border);
@@ -794,7 +873,7 @@ function extractPlainText(content: any): string {
 /* Collapse toggle */
 .collapse-toggle {
   position: absolute;
-  top: 3px;
+  top: 24px;  /* below the node-type-bar */
   left: 2px;
   width: 20px;
   height: 20px;
@@ -818,7 +897,7 @@ function extractPlainText(content: any): string {
 /* Link icon */
 .note-link-icon {
   position: absolute;
-  top: 3px;
+  top: 24px;  /* below the node-type-bar */
   right: 3px;
   width: 22px;
   height: 22px;
@@ -931,6 +1010,21 @@ function extractPlainText(content: any): string {
 
 .submenu-panel button.active {
   color: var(--accent);
+}
+
+.type-picker-panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.type-picker-panel button svg {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.type-picker-panel button.active svg {
+  opacity: 1;
 }
 
 .submenu-empty {
