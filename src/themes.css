@@ -1,0 +1,138 @@
+/* ── Theme definitions ── */
+
+:root,
+[data-theme="dark"] {
+  --bg-app: #1a1a1a;
+  --bg-sidebar: #222;
+  --bg-surface: #2a2a2a;
+  --bg-surface-hover: rgba(255, 255, 255, 0.06);
+  --bg-input: #1e1e1e;
+  --bg-canvas: #1a1a1a;
+
+  --border-main: #444;
+  --border-subtle: #333;
+  --border-input: #3a3a3a;
+  --border-input-focus: #555;
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #ccc;
+  --text-muted: #888;
+  --text-faint: #555;
+  --text-heading: #e0e0e0;
+
+  --accent: #42a5f5;
+  --accent-bg: rgba(66, 165, 245, 0.2);
+  --accent-text: #90caf9;
+  --danger: #f44336;
+  --danger-bg: rgba(244, 67, 54, 0.15);
+  --danger-text: #ef9a9a;
+
+  --note-default-color: var(--note-grey, #4a4a4a);
+  --note-bg-alpha: 30;
+  --note-border-alpha: aa;
+
+  --canvas-dot: rgba(255, 255, 255, 0.06);
+  --canvas-grid-size: 24px;
+
+  --format-bar-bg: #242424;
+  --controls-bg: #2a2a2a;
+
+  --scrollbar-thumb: #444;
+  --scrollbar-hover: #555;
+
+  --shadow-menu: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.4);
+
+  --minimap-bg: rgba(20, 20, 20, 0.85);
+  --minimap-border: #3a3a3a;
+  --minimap-viewport-fill: rgba(66, 165, 245, 0.08);
+  --minimap-viewport-stroke: rgba(66, 165, 245, 0.5);
+
+  --file-accent: #a5d6a7;
+  --file-accent-light: #c8e6c9;
+
+  --selection-bg: transparent;
+  --code-bg: rgba(0, 0, 0, 0.3);
+  --blockquote-border: #555;
+  --divider: rgba(255, 255, 255, 0.08);
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+
+  /* Note palette */
+  --note-grey: #4a4a4a;
+  --note-red: #e03131;
+  --note-orange: #e8590c;
+  --note-yellow: #f08c00;
+  --note-green: #2f9e44;
+  --note-cyan: #0c8599;
+  --note-blue: #1971c2;
+  --note-purple: #7048e8;
+  --note-pink: #c2255c;
+}
+
+[data-theme="paper"] {
+  --bg-app: #ddd6c8;
+  --bg-sidebar: #d0c9bb;
+  --bg-surface: #e8e2d6;
+  --bg-surface-hover: rgba(0, 0, 0, 0.04);
+  --bg-input: #e0dace;
+  --bg-canvas: #d5cec0;
+
+  --border-main: #b8b0a0;
+  --border-subtle: #c5bead;
+  --border-input: #c0b8a8;
+  --border-input-focus: #a09888;
+
+  --text-primary: #2c2c2c;
+  --text-secondary: #444;
+  --text-muted: #777;
+  --text-faint: #999;
+  --text-heading: #1a1a1a;
+
+  --accent: #4a7fb5;
+  --accent-bg: rgba(74, 127, 181, 0.15);
+  --accent-text: #3a6a9a;
+  --danger: #c0392b;
+  --danger-bg: rgba(192, 57, 43, 0.1);
+  --danger-text: #c0392b;
+
+  --note-default-color: var(--note-grey, #8a8478);
+  --note-bg-alpha: 40;
+  --note-border-alpha: 88;
+
+  --canvas-dot: rgba(0, 0, 0, 0.08);
+  --canvas-grid-size: 24px;
+
+  --format-bar-bg: #cdc6b8;
+  --controls-bg: #e0d9cb;
+
+  --scrollbar-thumb: #b5ad9d;
+  --scrollbar-hover: #a09888;
+
+  --shadow-menu: 0 8px 32px rgba(0, 0, 0, 0.15);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.12);
+
+  --minimap-bg: rgba(213, 206, 192, 0.92);
+  --minimap-border: #b8b0a0;
+  --minimap-viewport-fill: rgba(74, 127, 181, 0.1);
+  --minimap-viewport-stroke: rgba(74, 127, 181, 0.5);
+
+  --file-accent: #4a8a4f;
+  --file-accent-light: #5c9e61;
+
+  --selection-bg: transparent;
+  --code-bg: rgba(0, 0, 0, 0.06);
+  --blockquote-border: #a09888;
+  --divider: rgba(0, 0, 0, 0.08);
+  --overlay-bg: rgba(0, 0, 0, 0.25);
+
+  /* Note palette */
+  --note-grey: #8a8478;
+  --note-red: #c92a2a;
+  --note-orange: #d9480f;
+  --note-yellow: #e67700;
+  --note-green: #2b8a3e;
+  --note-cyan: #0b7285;
+  --note-blue: #1864ab;
+  --note-purple: #5f3dc4;
+  --note-pink: #a61e4d;
+}

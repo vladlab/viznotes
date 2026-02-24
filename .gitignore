@@ -1,0 +1,12 @@
+node_modules/
+dist/
+result
+.direnv/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+src-tauri/target/
+src-tauri/gen/

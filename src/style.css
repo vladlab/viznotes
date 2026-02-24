@@ -1,0 +1,118 @@
+@import './themes.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --app-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', 'Liberation Sans', sans-serif;
+}
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--app-font);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
+}
+
+.app-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.main-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.welcome-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+}
+
+.welcome-screen h1 {
+  font-size: 1.8em;
+  font-weight: 300;
+  color: var(--text-muted);
+}
+
+.welcome-screen p {
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+
+.welcome-btn {
+  margin-top: 12px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-main);
+  color: var(--text-secondary);
+  padding: 10px 20px;
+  font-size: 0.9em;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.welcome-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--border-main);
+}
+
+.change-vault-btn {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 0.8em;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.change-vault-btn:hover {
+  color: var(--text-muted);
+}
+
+.loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  background: var(--bg-app);
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
