@@ -158,6 +158,7 @@ import { useBoxSelection } from '../composables/useBoxSelection'
 import type { Note } from '../types/note'
 import type { ResizeHandle } from '../composables/useResize'
 import { appStore } from '../stores/app'
+import { history } from '../stores/history'
 import { settings } from '../stores/settings'
 import { loadUserTheme } from '../utils/themeLoader'
 import NoteComponent from './NoteComponent.vue'
@@ -251,8 +252,9 @@ function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'ce
   const items = getSelectedNoteRects()
   if (items.length < 2) return
 
-  // Snapshot for undo
-  const befores = items.map(i => ({ id: i.note.id, x: i.note.pos.x, y: i.note.pos.y }))
+  // Snapshot before
+  const noteIds = items.map(i => i.note.id)
+  const notesBefore = history.snapshotNotes(appStore.notes, noteIds)
 
   let target: number
   switch (mode) {
@@ -283,11 +285,27 @@ function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'ce
   }
 
   items.forEach(i => appStore.updateNote(i.note))
+
+  // Snapshot after and push undo
+  const notesAfter = history.snapshotNotes(appStore.notes, noteIds)
+  history.pushAction({
+    description: `Align notes (${mode})`,
+    notesBefore,
+    notesAfter,
+    rootIdsBefore: null,
+    rootIdsAfter: null,
+    selectionBefore: noteIds,
+    selectionAfter: noteIds,
+  })
 }
 
 function distributeNotes(axis: 'horizontal' | 'vertical') {
   const items = getSelectedNoteRects()
   if (items.length < 3) return
+
+  // Snapshot before
+  const noteIds = items.map(i => i.note.id)
+  const notesBefore = history.snapshotNotes(appStore.notes, noteIds)
 
   if (axis === 'horizontal') {
     items.sort((a, b) => a.note.pos.x - b.note.pos.x)
@@ -314,6 +332,18 @@ function distributeNotes(axis: 'horizontal' | 'vertical') {
   }
 
   items.forEach(i => appStore.updateNote(i.note))
+
+  // Snapshot after and push undo
+  const notesAfter = history.snapshotNotes(appStore.notes, noteIds)
+  history.pushAction({
+    description: `Distribute notes (${axis})`,
+    notesBefore,
+    notesAfter,
+    rootIdsBefore: null,
+    rootIdsAfter: null,
+    selectionBefore: noteIds,
+    selectionAfter: noteIds,
+  })
 }
 
 const canvas = useCanvas(containerRef)

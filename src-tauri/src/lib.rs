@@ -74,10 +74,24 @@ fn read_text_file(path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    if let Some(parent) = Path::new(&path).parent() {
+    let target = Path::new(&path);
+    if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, contents).map_err(|e| e.to_string())
+    // Atomic write: write to temp file, then rename into place.
+    // fs::rename on the same filesystem is atomic on POSIX and uses
+    // MoveFileEx(MOVEFILE_REPLACE_EXISTING) on Windows.
+    let tmp_path = format!("{}.tmp", path);
+    fs::write(&tmp_path, &contents).map_err(|e| {
+        // Clean up temp file on write failure
+        let _ = fs::remove_file(&tmp_path);
+        e.to_string()
+    })?;
+    fs::rename(&tmp_path, &path).map_err(|e| {
+        // Clean up temp file on rename failure
+        let _ = fs::remove_file(&tmp_path);
+        e.to_string()
+    })
 }
 
 #[tauri::command]

@@ -420,10 +420,8 @@ function toggleTypePicker() {
 function setNodeType(typeKey: string) {
   const before = history.snapshotNote(appStore.notes, props.note.id)!
   props.note.nodeType = typeKey
-  props.note.updatedAt = Date.now()
   appStore.updateNote(props.note)
-  const after = history.snapshotNote(appStore.notes, props.note.id)!
-  history.push({ type: 'note-update', before, after })
+  appStore.pushNotePropertyAction(props.note.id, before, 'Change node type')
   typePickerVisible.value = false
   contextMenuVisible.value = false
 }
@@ -555,10 +553,8 @@ async function followLink() {
       // Dead link — clean it up
       const before = history.snapshotNote(appStore.notes, props.note.id)!
       props.note.link = ''
-      props.note.updatedAt = Date.now()
       appStore.updateNote(props.note)
-      const after = history.snapshotNote(appStore.notes, props.note.id)!
-      history.push({ type: 'note-update', before, after })
+      appStore.pushNotePropertyAction(props.note.id, before, 'Remove dead link')
     }
   }
 }
