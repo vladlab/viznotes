@@ -251,22 +251,54 @@ interface NoteRect {
   cx: number; cy: number
 }
 
+// ── Note rect caching ──
+
+// Cache for note rects during drag sessions
+const noteRectCache = new Map<string, NoteRect>()
+
+// Cached container rect — refreshed once per recomputeArrows call
+let cachedContainerRect: DOMRect | null = null
+let cachedContainerEl: Element | null = null
+
+function refreshContainerRect() {
+  if (!cachedContainerEl) {
+    cachedContainerEl = document.querySelector('.canvas-container')
+  }
+  cachedContainerRect = cachedContainerEl?.getBoundingClientRect() ?? null
+}
+
+function clearRectCache() {
+  noteRectCache.clear()
+}
+
 function getNoteRect(noteId: string): NoteRect | null {
+  // During drag, use cache for non-moving notes
+  if (appStore.dragSessionNoteIds.size > 0 && !appStore.dragSessionNoteIds.has(noteId)) {
+    const cached = noteRectCache.get(noteId)
+    if (cached) return cached
+  }
+
   const el = document.getElementById(`note-${noteId}`)
   if (!el) return null
+  if (!cachedContainerRect) return null
 
   const domRect = el.getBoundingClientRect()
   const t = props.transform
-  const containerEl = document.querySelector('.canvas-container')
-  if (!containerEl) return null
-  const cr = containerEl.getBoundingClientRect()
+  const cr = cachedContainerRect
 
   const x = (domRect.left - cr.left - t.x) / t.scale
   const y = (domRect.top - cr.top - t.y) / t.scale
   const w = domRect.width / t.scale
   const h = domRect.height / t.scale
 
-  return { id: noteId, x, y, w, h, cx: x + w / 2, cy: y + h / 2 }
+  const rect: NoteRect = { id: noteId, x, y, w, h, cx: x + w / 2, cy: y + h / 2 }
+
+  // Cache the result during drag
+  if (appStore.dragSessionNoteIds.size > 0) {
+    noteRectCache.set(noteId, rect)
+  }
+
+  return rect
 }
 
 function getAnchorPoint(rect: NoteRect, side: AnchorSide, offset = 4): { x: number; y: number } {
@@ -320,9 +352,9 @@ function closestAnchorSide(rect: NoteRect, wx: number, wy: number): AnchorSide {
 
 function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
   const t = props.transform
-  const containerEl = document.querySelector('.canvas-container')
-  if (!containerEl) return { x: 0, y: 0 }
-  const cr = containerEl.getBoundingClientRect()
+  // Use cached container rect if available, otherwise query fresh
+  const cr = cachedContainerRect ?? document.querySelector('.canvas-container')?.getBoundingClientRect()
+  if (!cr) return { x: 0, y: 0 }
   return {
     x: (clientX - cr.left - t.x) / t.scale,
     y: (clientY - cr.top - t.y) / t.scale,
@@ -368,6 +400,10 @@ function headPathFromCubic(pathStr: string): string {
 }
 
 function recomputeArrows() {
+  // Refresh container rect once per recompute pass
+  refreshContainerRect()
+  if (!cachedContainerRect) { renderedArrows.value = []; return }
+
   const results: RenderedArrow[] = []
 
   for (const arrow of appStore.arrows.values()) {
@@ -404,17 +440,21 @@ appStore.setArrowRecompute(recomputeArrows)
 // Re-resolve arrow colors when user theme CSS is reloaded
 watch(themeReloadCount, () => recomputeArrows())
 
-// Reactive recompute on structural changes (arrow add/remove, note changes outside drag)
-watchEffect(() => {
-  const _ = appStore.arrows.size
-  for (const arrow of appStore.arrows.values()) {
-    const s = appStore.notes.get(arrow.sourceNoteId)
-    const t = appStore.notes.get(arrow.targetNoteId)
-    if (s) { s.pos.x; s.pos.y; s.width; s.height; s.zIndex }
-    if (t) { t.pos.x; t.pos.y; t.width; t.height; t.zIndex }
-  }
+// Recompute on structural changes: arrow add/remove
+// Note position changes during drag are handled by triggerArrowRecompute() callback.
+// Non-drag position changes (undo/redo, alignment) call triggerArrowRecompute() explicitly.
+watch(() => appStore.arrows.size, () => {
+  clearRectCache()
   requestAnimationFrame(recomputeArrows)
 }, { flush: 'post' })
+
+// Clear rect cache when drag session ends
+watch(() => appStore.dragSessionNoteIds.size, (newSize, oldSize) => {
+  if (newSize === 0 && oldSize > 0) {
+    clearRectCache()
+    requestAnimationFrame(recomputeArrows)
+  }
+})
 
 // ── Connector handles on selected notes ──
 

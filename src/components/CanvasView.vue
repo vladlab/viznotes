@@ -297,6 +297,8 @@ function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'ce
     selectionBefore: noteIds,
     selectionAfter: noteIds,
   })
+
+  appStore.triggerArrowRecompute()
 }
 
 function distributeNotes(axis: 'horizontal' | 'vertical') {
@@ -344,6 +346,8 @@ function distributeNotes(axis: 'horizontal' | 'vertical') {
     selectionBefore: noteIds,
     selectionAfter: noteIds,
   })
+
+  appStore.triggerArrowRecompute()
 }
 
 const canvas = useCanvas(containerRef)

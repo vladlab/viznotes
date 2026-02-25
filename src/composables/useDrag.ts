@@ -50,6 +50,7 @@ export function useDrag(
     hasMoved.value = false
     draggedNotes = []
     isSpatialDrag = true
+    appStore.dragSessionNoteIds.clear()
   }
 
   function startDrag(note: Note, parentNoteId: string | undefined, e: PointerEvent) {
@@ -99,6 +100,12 @@ export function useDrag(
     captureTarget = e.target as HTMLElement
     try { captureTarget.setPointerCapture(e.pointerId) } catch {}
     captureTarget.addEventListener('lostpointercapture', handleLostCapture)
+
+    // Track dragged notes for arrow rect caching
+    appStore.dragSessionNoteIds.clear()
+    for (const dn of draggedNotes) {
+      appStore.dragSessionNoteIds.add(dn.note.id)
+    }
 
     window.addEventListener('pointermove', handleDragMove)
     window.addEventListener('pointerup', handleDragEnd)

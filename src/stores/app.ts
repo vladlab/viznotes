@@ -32,6 +32,8 @@ import {
   deepClone,
   persistNote,
   persistPage,
+  rebuildParentMap,
+  dragSessionNoteIds,
 } from './state'
 
 // ── Selection ──
@@ -135,6 +137,12 @@ history.setApplySnapshot(async (action, direction) => {
     if (arrows.has(id)) selectedArrowIds.add(id)
   }
   editingNoteId.value = null
+
+  // Rebuild parent map (undo/redo may have changed parent-child relationships)
+  rebuildParentMap()
+
+  // Recompute arrows since note positions/existence may have changed
+  triggerArrowRecompute()
 })
 
 // ── Public API ──
@@ -157,6 +165,7 @@ export const appStore = {
   dragTick,
   setArrowRecompute,
   triggerArrowRecompute,
+  dragSessionNoteIds,
 
   // Computed
   rootNotes,
