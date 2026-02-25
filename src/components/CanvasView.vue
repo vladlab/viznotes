@@ -20,6 +20,12 @@
 
     <!-- Zoom controls -->
     <div class="canvas-controls">
+      <div
+        class="save-indicator"
+        :class="{ pending: appStore.hasPendingSaves.value }"
+        :title="appStore.hasPendingSaves.value ? 'Saving…' : 'All changes saved'"
+      />
+      <div class="controls-separator" />
       <button
         class="scroll-mode-btn"
         :class="{ active: scrollMode === 'mouse' }"
@@ -39,7 +45,15 @@
       <button @click="canvas.zoomIn()" title="Zoom in">+</button>
       <span class="zoom-level">{{ zoomPercent }}%</span>
       <button @click="canvas.zoomOut()" title="Zoom out">−</button>
-      <button @click="canvas.resetView()" title="Reset view">⌂</button>
+      <button @click="canvas.resetZoom()" title="Reset zoom to 100%">1:1</button>
+      <button @click="fitAllNotes" title="Fit all notes">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 3h6v6" />
+          <path d="M9 21H3v-6" />
+          <path d="M21 3l-7 7" />
+          <path d="M3 21l7-7" />
+        </svg>
+      </button>
       <button @click="centerOnSelection" title="Center on selection" :disabled="appStore.selectedNoteIds.size === 0">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10" />
@@ -136,7 +150,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useCanvas } from '../composables/useCanvas'
 import { useDrag } from '../composables/useDrag'
 import { useResize } from '../composables/useResize'
@@ -145,6 +159,7 @@ import type { Note } from '../types/note'
 import type { ResizeHandle } from '../composables/useResize'
 import { appStore } from '../stores/app'
 import { settings } from '../stores/settings'
+import { loadUserTheme } from '../utils/themeLoader'
 import NoteComponent from './NoteComponent.vue'
 import ArrowLayer from './ArrowLayer.vue'
 import Minimap from './Minimap.vue'
@@ -214,6 +229,22 @@ function centerOnSelection() {
   canvas.transform.scale = scale
   canvas.transform.x = vw / 2 - cx * scale
   canvas.transform.y = vh / 2 - cy * scale
+}
+
+function fitAllNotes() {
+  const positions: Array<{ x: number; y: number; w: number; h: number }> = []
+  if (!appStore.currentPage.value) return
+
+  for (const id of appStore.currentPage.value.rootNoteIds) {
+    const note = appStore.notes.get(id)
+    if (!note) continue
+    const el = document.getElementById(`note-${id}`) as HTMLElement | null
+    const w = el?.offsetWidth ?? 200
+    const h = el?.offsetHeight ?? 60
+    positions.push({ x: note.pos.x, y: note.pos.y, w, h })
+  }
+
+  canvas.fitAll(positions)
 }
 
 function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'center-v') {
@@ -322,6 +353,14 @@ function isCanvasBackground(target: HTMLElement): boolean {
 }
 
 function onCanvasPointerDown(e: PointerEvent) {
+  // Kill any stuck drag/resize from a lost pointerup (e.g. compositor window move)
+  if (drag.isDragging.value) {
+    drag.cancelDrag()
+  }
+  if (resize.isResizing.value) {
+    resize.cancelResize()
+  }
+
   // Focus the canvas for keyboard events
   containerRef.value?.focus()
 
@@ -406,6 +445,13 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Reload user theme CSS
+  if (isCtrl && e.shiftKey && e.key === 'T') {
+    e.preventDefault()
+    loadUserTheme()
+    return
+  }
+
   // Don't handle other keys when editing
   if (appStore.editingNoteId.value) {
     if (e.key === 'Escape') {
@@ -425,6 +471,12 @@ function onKeyDown(e: KeyboardEvent) {
       break
 
     case 'Escape':
+      if (drag.isDragging.value) {
+        drag.cancelDrag()
+      }
+      if (resize.isResizing.value) {
+        resize.cancelResize()
+      }
       appStore.clearSelection()
       appStore.clearEditing()
       break
@@ -537,8 +589,60 @@ function onMinimapPan(x: number, y: number) {
   canvas.transform.y = y
 }
 
+// ── Per-page viewport memory ──
+const pageViewports = new Map<string, { x: number; y: number; scale: number }>()
+
+function saveCurrentViewport() {
+  const pageId = appStore.currentPageId.value
+  if (pageId) {
+    pageViewports.set(pageId, {
+      x: canvas.transform.x,
+      y: canvas.transform.y,
+      scale: canvas.transform.scale,
+    })
+  }
+}
+
+function restoreOrFitViewport() {
+  const pageId = appStore.currentPageId.value
+  if (!pageId) return
+
+  const saved = pageViewports.get(pageId)
+  if (saved) {
+    canvas.transform.x = saved.x
+    canvas.transform.y = saved.y
+    canvas.transform.scale = saved.scale
+  } else {
+    // First visit to this page — fit all notes
+    fitAllNotes()
+  }
+}
+
+// Save viewport before page switch, restore/fit after
+watch(() => appStore.currentPageId.value, (_newId, oldId) => {
+  if (oldId) {
+    pageViewports.set(oldId, {
+      x: canvas.transform.x,
+      y: canvas.transform.y,
+      scale: canvas.transform.scale,
+    })
+  }
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      restoreOrFitViewport()
+    })
+  })
+})
+
 onMounted(async () => {
   containerRef.value?.focus()
+
+  // Fit all notes on initial launch
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      fitAllNotes()
+    })
+  })
 
   // Track container size for minimap
   if (containerRef.value) {
@@ -674,6 +778,19 @@ onUnmounted(() => {
   height: 18px;
   background: var(--border-main);
   margin: 0 2px;
+}
+
+.save-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4caf50;
+  transition: background 0.3s ease;
+  flex-shrink: 0;
+}
+
+.save-indicator.pending {
+  background: #ff9800;
 }
 
 .scroll-mode-btn {

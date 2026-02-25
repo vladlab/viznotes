@@ -249,6 +249,9 @@ async function loadPageList() {
 }
 
 async function loadPage(pageId: string) {
+  // Flush any pending saves from the current page before switching
+  await flushPendingSaves()
+
   loading.value = true
   editingNoteId.value = null
   editStartSnapshot = null
@@ -417,18 +420,56 @@ async function updateNote(note: Note) {
   }
 }
 
-const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// ── Batched save system ──
 
-function debouncedSaveNote(note: Note, delay = 300) {
-  const existing = saveTimers.get(note.id)
-  if (existing) clearTimeout(existing)
-  saveTimers.set(
-    note.id,
-    setTimeout(async () => {
-      saveTimers.delete(note.id)
-      await storage.saveNote(note)
-    }, delay)
-  )
+const dirtyNoteIds = new Set<string>()
+const dirtyPage = ref(false)
+const hasPendingSaves = ref(false)
+let _saveBatchTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleSave(delay = 300) {
+  hasPendingSaves.value = true
+  if (_saveBatchTimer) clearTimeout(_saveBatchTimer)
+  _saveBatchTimer = setTimeout(() => flushPendingSaves(), delay)
+}
+
+function markNoteDirty(note: Note, delay = 300) {
+  dirtyNoteIds.add(note.id)
+  scheduleSave(delay)
+}
+
+function markPageDirty(delay = 300) {
+  dirtyPage.value = true
+  scheduleSave(delay)
+}
+
+async function flushPendingSaves() {
+  if (_saveBatchTimer) { clearTimeout(_saveBatchTimer); _saveBatchTimer = null }
+
+  // Flush dirty notes
+  if (dirtyNoteIds.size > 0) {
+    const notesToSave: Note[] = []
+    for (const id of dirtyNoteIds) {
+      const note = notes.get(id)
+      if (note) {
+        note.updatedAt = Date.now()
+        notesToSave.push(toRaw(note))
+      }
+    }
+    dirtyNoteIds.clear()
+    if (notesToSave.length > 0) {
+      await storage.saveNotes(notesToSave)
+    }
+  }
+
+  // Flush dirty page
+  if (dirtyPage.value && currentPage.value) {
+    currentPage.value.updatedAt = Date.now()
+    await storage.savePage(toRaw(currentPage.value))
+    dirtyPage.value = false
+  }
+
+  hasPendingSaves.value = false
 }
 
 /**
@@ -670,7 +711,8 @@ async function deleteAllSelected() {
 function bringToTop(note: Note) {
   if (!currentPage.value) return
   note.zIndex = currentPage.value.nextZIndex++
-  debouncedSaveNote(note)
+  markNoteDirty(note)
+  markPageDirty()
 }
 
 // ── Reparenting ──
@@ -899,6 +941,37 @@ function pushNotePropertyAction(noteId: string, before: Note, description: strin
 
 async function deletePage(pageId: string) {
   const wasCurrent = currentPageId.value === pageId
+
+  // Clean up note links pointing to this page across ALL pages
+  const allPages = await storage.listPages()
+  for (const pageSummary of allPages) {
+    if (pageSummary.id === pageId) continue  // skip the page being deleted
+    const pageNotes = await storage.getNotesForPage(pageSummary.id)
+    const dirtyNotes: Note[] = []
+    for (const note of pageNotes) {
+      if (note.link === pageId) {
+        note.link = ''
+        note.updatedAt = Date.now()
+        dirtyNotes.push(note)
+      }
+    }
+    if (dirtyNotes.length > 0) {
+      await storage.saveNotes(dirtyNotes)
+    }
+  }
+
+  // Also clean currently loaded in-memory notes
+  for (const [, note] of notes) {
+    if (note.link === pageId) {
+      note.link = ''
+      note.updatedAt = Date.now()
+      await storage.saveNote(toRaw(note))
+    }
+  }
+
+  // Remove from page history
+  pageHistory.value = pageHistory.value.filter(id => id !== pageId)
+
   await storage.deletePage(pageId)
   await loadPageList()
   if (wasCurrent) {
@@ -983,7 +1056,10 @@ export const appStore = {
   // Note
   createNote,
   updateNote,
-  debouncedSaveNote,
+  markNoteDirty,
+  markPageDirty,
+  flushPendingSaves,
+  hasPendingSaves,
   deleteNote,
   deleteSelected,
   deleteAllSelected,

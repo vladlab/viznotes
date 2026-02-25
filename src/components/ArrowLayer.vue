@@ -1,20 +1,6 @@
 <template>
   <svg class="arrow-layer" :style="{ transform: transformCSS }">
     <defs>
-      <!-- Generate arrowhead markers for each unique color in use -->
-      <marker
-        v-for="color in activeMarkerColors"
-        :key="color"
-        :id="`arrowhead-${color.replace(/[^a-zA-Z0-9]/g, '_')}`"
-        markerWidth="10"
-        markerHeight="8"
-        refX="7"
-        refY="4"
-        orient="auto"
-        markerUnits="strokeWidth"
-      >
-        <path d="M0,0.5 L9,4 L0,7.5 L1.5,4 Z" :fill="color" />
-      </marker>
     </defs>
 
     <!-- Existing arrows -->
@@ -42,7 +28,10 @@
         :stroke="selectedArrowIds.has(arrow.id) ? accentColor : arrow.color"
         stroke-width="2"
         :stroke-dasharray="arrow.dashed ? '8,5' : 'none'"
-        :marker-end="`url(#arrowhead-${(selectedArrowIds.has(arrow.id) ? accentColor : arrow.color).replace(/[^a-zA-Z0-9]/g, '_')})`"
+      />
+      <path
+        :d="arrow.headPath"
+        :fill="selectedArrowIds.has(arrow.id) ? accentColor : arrow.color"
       />
     </g>
 
@@ -55,7 +44,12 @@
       stroke-width="2"
       :stroke-dasharray="dragging.mode === 'create' ? '6,4' : 'none'"
       :opacity="dragging.mode === 'create' ? 0.7 : 1"
-      :marker-end="`url(#arrowhead-${accentColor.replace(/[^a-zA-Z0-9]/g, '_')})`"
+    />
+    <path
+      v-if="dragging.active && dragging.headPath"
+      :d="dragging.headPath"
+      :fill="accentColor"
+      :opacity="dragging.mode === 'create' ? 0.7 : 1"
     />
 
     <!-- Source connector handles on selected notes -->
@@ -125,10 +119,11 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watchEffect, toRaw } from 'vue'
+import { reactive, ref, computed, watchEffect, watch, toRaw } from 'vue'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { settings } from '../stores/settings'
+import { themeReloadCount } from '../utils/themeLoader'
 import { anchorDirection } from '../types/arrow'
 import { NOTE_COLOR_NAMES } from '../types/note'
 import type { AnchorSide, Arrow } from '../types/arrow'
@@ -143,22 +138,13 @@ const selectedArrowIds = appStore.selectedArrowIds
 
 const arrowColor = computed(() => {
   const _theme = settings.theme
+  const _reload = themeReloadCount.value
   return getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#888'
 })
 const accentColor = computed(() => {
   const _theme = settings.theme
+  const _reload = themeReloadCount.value
   return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#42a5f5'
-})
-
-/** Collect unique colors used by rendered arrows + accent for markers */
-const activeMarkerColors = computed(() => {
-  const colors = new Set<string>()
-  colors.add(arrowColor.value)
-  colors.add(accentColor.value)
-  for (const a of renderedArrows.value) {
-    colors.add(a.color)
-  }
-  return [...colors]
 })
 
 // ── Arrow context menu ──
@@ -250,6 +236,7 @@ const dragging = reactive({
 
   // Preview
   path: '',
+  headPath: '',
   hoveredNoteId: null as string | null,
   hoveredAnchor: null as AnchorSide | null,
 })
@@ -308,7 +295,14 @@ function buildBezierPath(
   const cp2x = x2 + d2.dx * curvature
   const cp2y = y2 + d2.dy * curvature
 
-  return `M${x1},${y1} C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`
+  // Shorten line so it stops at the base of the arrowhead (12px back from tip)
+  const approachDx = x2 - cp2x
+  const approachDy = y2 - cp2y
+  const approachDist = Math.sqrt(approachDx * approachDx + approachDy * approachDy) || 1
+  const shortenedX2 = x2 - (approachDx / approachDist) * 10
+  const shortenedY2 = y2 - (approachDy / approachDist) * 10
+
+  return `M${x1},${y1} C${cp1x},${cp1y} ${cp2x},${cp2y} ${shortenedX2},${shortenedY2}`
 }
 
 function closestAnchorSide(rect: NoteRect, wx: number, wy: number): AnchorSide {
@@ -337,13 +331,40 @@ function clientToWorld(clientX: number, clientY: number): { x: number; y: number
 
 // ── Rendered arrows ──
 
-interface RenderedArrow { id: string; path: string; color: string; dashed: boolean }
+interface RenderedArrow { id: string; path: string; headPath: string; color: string; dashed: boolean }
 const renderedArrows = ref<RenderedArrow[]>([])
 
 /** Resolve arrow color: 'default' uses theme muted, named colors use CSS vars */
 function resolveArrowColor(arrow: { color: string }): string {
   if (!arrow.color || arrow.color === 'default') return arrowColor.value
   return getComputedStyle(document.documentElement).getPropertyValue(`--note-${arrow.color}`).trim() || arrowColor.value
+}
+
+/** Build arrowhead triangle path from tip point and approach angle */
+function buildArrowheadPath(
+  tipX: number, tipY: number, cp2x: number, cp2y: number
+): string {
+  const angle = Math.atan2(tipY - cp2y, tipX - cp2x)
+  const length = 12
+  const halfWidth = 5
+  // Two base corners of the triangle
+  const bx1 = tipX - Math.cos(angle) * length - Math.cos(angle - Math.PI / 2) * halfWidth
+  const by1 = tipY - Math.sin(angle) * length - Math.sin(angle - Math.PI / 2) * halfWidth
+  const bx2 = tipX - Math.cos(angle) * length + Math.cos(angle - Math.PI / 2) * halfWidth
+  const by2 = tipY - Math.sin(angle) * length + Math.sin(angle - Math.PI / 2) * halfWidth
+  return `M${tipX},${tipY} L${bx1},${by1} L${bx2},${by2} Z`
+}
+
+/** Extract arrowhead path from an SVG cubic bezier path string */
+function headPathFromCubic(pathStr: string): string {
+  // Path format: M x1,y1 C cp1x,cp1y cp2x,cp2y x2,y2
+  const nums = pathStr.match(/-?[\d.]+/g)
+  if (!nums || nums.length < 8) return ''
+  const cp2x = parseFloat(nums[4])
+  const cp2y = parseFloat(nums[5])
+  const tipX = parseFloat(nums[6])
+  const tipY = parseFloat(nums[7])
+  return buildArrowheadPath(tipX, tipY, cp2x, cp2y)
 }
 
 function recomputeArrows() {
@@ -360,7 +381,18 @@ function recomputeArrows() {
     const sp = getAnchorPoint(sourceRect, srcAnchor)
     const tp = getAnchorPoint(targetRect, tgtAnchor)
     const path = buildBezierPath(sp.x, sp.y, srcAnchor, tp.x, tp.y, tgtAnchor)
-    results.push({ id: arrow.id, path, color: resolveArrowColor(arrow), dashed: arrow.dashed ?? false })
+
+    // Compute arrowhead from original tip + approach direction
+    const d2 = anchorDirection(tgtAnchor)
+    const dx = tp.x - sp.x
+    const dy = tp.y - sp.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const curvature = Math.max(30, Math.min(dist * 0.4, 150))
+    const cp2x = tp.x + d2.dx * curvature
+    const cp2y = tp.y + d2.dy * curvature
+    const headPath = buildArrowheadPath(tp.x, tp.y, cp2x, cp2y)
+
+    results.push({ id: arrow.id, path, headPath, color: resolveArrowColor(arrow), dashed: arrow.dashed ?? false })
   }
 
   renderedArrows.value = results
@@ -368,6 +400,9 @@ function recomputeArrows() {
 
 // Register direct callback so drag/resize can trigger recompute
 appStore.setArrowRecompute(recomputeArrows)
+
+// Re-resolve arrow colors when user theme CSS is reloaded
+watch(themeReloadCount, () => recomputeArrows())
 
 // Reactive recompute on structural changes (arrow add/remove, note changes outside drag)
 watchEffect(() => {
@@ -460,6 +495,7 @@ function handleDragMove(ev: PointerEvent) {
         // Dragging source: loose is source, fixed is target
         dragging.path = buildBezierPath(tp.x, tp.y, closestSide, fp.x, fp.y, dragging.fixedAnchor)
       }
+      dragging.headPath = headPathFromCubic(dragging.path)
       return
     }
   }
@@ -480,6 +516,7 @@ function handleDragMove(ev: PointerEvent) {
   } else {
     dragging.path = `M${world.x},${world.y} C${world.x},${world.y} ${fp.x + d.dx * curve},${fp.y + d.dy * curve} ${fp.x},${fp.y}`
   }
+  dragging.headPath = headPathFromCubic(dragging.path)
 }
 
 async function handleDragUp(ev: PointerEvent) {
@@ -494,6 +531,7 @@ async function handleDragUp(ev: PointerEvent) {
 
   dragging.active = false
   dragging.path = ''
+  dragging.headPath = ''
   targetSnapPoints.value = []
 
   if (mode === 'create') {
@@ -559,6 +597,7 @@ function startDrag(
   dragging.arrowId = arrowId
   dragging.arrowBefore = arrowBefore
   dragging.path = ''
+  dragging.headPath = ''
   dragging.hoveredNoteId = null
   dragging.hoveredAnchor = null
   targetSnapPoints.value = []

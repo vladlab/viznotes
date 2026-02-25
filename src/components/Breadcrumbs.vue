@@ -34,9 +34,10 @@ const crumbs = computed<Crumb[]>(() => {
   // Walk the history stack — each entry is a page ID
   for (const pageId of appStore.pageHistory.value) {
     const page = appStore.pageList.value.find(p => p.id === pageId)
+    if (!page) continue  // skip deleted/zombie pages
     result.push({
       id: pageId,
-      title: page?.title || 'Untitled',
+      title: page.title || 'Untitled',
       isCurrent: false,
     })
   }

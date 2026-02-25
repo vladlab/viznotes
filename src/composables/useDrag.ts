@@ -31,8 +31,32 @@ export function useDrag(
 
   const DRAG_THRESHOLD = 4
 
+  let captureTarget: HTMLElement | null = null
+
+  function cleanupDrag() {
+    window.removeEventListener('pointermove', handleDragMove)
+    window.removeEventListener('pointerup', handleDragEnd)
+    if (captureTarget) {
+      captureTarget.removeEventListener('lostpointercapture', handleLostCapture)
+      captureTarget = null
+    }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+    pendingEvent = null
+    removeGhost()
+    isDragging.value = false
+    dragNote.value = null
+    dragTargetId.value = null
+    dropTargetId.value = null
+    hasMoved.value = false
+    draggedNotes = []
+    isSpatialDrag = true
+  }
+
   function startDrag(note: Note, parentNoteId: string | undefined, e: PointerEvent) {
     if (!note.movable) return
+
+    // Kill any stuck drag from a previous interaction
+    if (dragNote.value) cleanupDrag()
 
     isDragging.value = false
     dragNote.value = note
@@ -71,8 +95,20 @@ export function useDrag(
       }]
     }
 
+    // Capture pointer to guarantee we receive move/up even if pointer leaves window
+    captureTarget = e.target as HTMLElement
+    try { captureTarget.setPointerCapture(e.pointerId) } catch {}
+    captureTarget.addEventListener('lostpointercapture', handleLostCapture)
+
     window.addEventListener('pointermove', handleDragMove)
     window.addEventListener('pointerup', handleDragEnd)
+  }
+
+  function handleLostCapture() {
+    // If we lose capture without a clean pointerup, force end the drag
+    if (dragNote.value) {
+      handleDragEnd(new PointerEvent('pointerup'))
+    }
   }
 
   function handleDragMove(e: PointerEvent) {
@@ -202,23 +238,19 @@ export function useDrag(
   }
 
   async function handleDragEnd(e: PointerEvent) {
-    window.removeEventListener('pointermove', handleDragMove)
-    window.removeEventListener('pointerup', handleDragEnd)
-
-    // Cancel any pending animation frame
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
-    pendingEvent = null
-
     const note = dragNote.value
     const parentId = dragParentId.value
     const targetId = dropTargetId.value
+    const moved = hasMoved.value
+    const savedDraggedNotes = [...draggedNotes]
 
-    removeGhost()
+    // Clean up all listeners and state immediately
+    cleanupDrag()
 
-    if (note && hasMoved.value) {
+    if (note && moved) {
       if (targetId) {
         // Reparent all dragged notes into the target container
-        for (const dn of draggedNotes) {
+        for (const dn of savedDraggedNotes) {
           const dnParentId = dn.note.id === note.id ? parentId : appStore.findParent(dn.note.id)
           await appStore.reparentNote(dn.note.id, dnParentId, targetId)
         }
@@ -234,27 +266,19 @@ export function useDrag(
         }
       } else {
         // Normal move — push undo with before/after snapshots
-        const moved = draggedNotes.map(dn => ({
+        const movedNotes = savedDraggedNotes.map(dn => ({
           id: dn.note.id,
           before: dn.beforeSnapshot,
           after: history.snapshotNote(appStore.notes, dn.note.id)!,
         }))
-        appStore.pushMoveAction(moved)
+        appStore.pushMoveAction(movedNotes)
 
         // Persist
-        for (const dn of draggedNotes) {
-          appStore.debouncedSaveNote(dn.note, 100)
+        for (const dn of savedDraggedNotes) {
+          appStore.markNoteDirty(dn.note, 100)
         }
       }
     }
-
-    isDragging.value = false
-    dragNote.value = null
-    dragTargetId.value = null
-    dropTargetId.value = null
-    hasMoved.value = false
-    draggedNotes = []
-    isSpatialDrag = true
   }
 
   return {
@@ -263,5 +287,6 @@ export function useDrag(
     dragTargetId,
     dropTargetId,
     startDrag,
+    cancelDrag: cleanupDrag,
   }
 }

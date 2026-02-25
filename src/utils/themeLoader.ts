@@ -3,10 +3,15 @@
  * Creates a documented default file if it doesn't exist.
  */
 
+import { ref } from 'vue'
+
+/** Bumped every time user theme is reloaded — watch this for reactivity */
+export const themeReloadCount = ref(0)
+
 const DEFAULT_THEME_CSS = `/*
  * vizNotes — Theme Overrides
  *
- * Edit this file to customize colors. Changes take effect on app restart.
+ * Edit this file to customize colors. Press Ctrl+Shift+T to reload without restarting.
  * Uncomment any line below and change the value to override.
  *
  * The app has two built-in themes: "dark" and "paper".
@@ -86,6 +91,7 @@ export async function loadUserTheme(): Promise<void> {
     styleEl.id = 'viznotes-user-theme'
     styleEl.textContent = css
     document.head.appendChild(styleEl)
+    themeReloadCount.value++
     console.log('[theme] Loaded user theme overrides from', themePath)
   } catch (e) {
     console.warn('[theme] Failed to load user theme:', e)

@@ -111,10 +111,57 @@ export function useCanvas(containerRef: Ref<HTMLElement | null>) {
     isPanning.value = false
   }
 
-  function resetView() {
-    transform.x = 0
-    transform.y = 0
+  function resetZoom() {
+    const container = containerRef.value
+    if (container) {
+      const rect = container.getBoundingClientRect()
+      const cx = rect.width / 2
+      const cy = rect.height / 2
+      // Zoom to 1.0 centered on current viewport center
+      const scaleRatio = 1 / transform.scale
+      transform.x = cx - (cx - transform.x) * scaleRatio
+      transform.y = cy - (cy - transform.y) * scaleRatio
+    }
     transform.scale = 1
+  }
+
+  function fitAll(notePositions: Array<{ x: number; y: number; w: number; h: number }>) {
+    if (notePositions.length === 0) {
+      // No notes — just reset
+      transform.x = 0
+      transform.y = 0
+      transform.scale = 1
+      return
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const { x, y, w, h } of notePositions) {
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x + w)
+      maxY = Math.max(maxY, y + h)
+    }
+
+    const bw = maxX - minX
+    const bh = maxY - minY
+    const cx = minX + bw / 2
+    const cy = minY + bh / 2
+
+    const container = containerRef.value
+    const vw = container?.clientWidth ?? 800
+    const vh = container?.clientHeight ?? 600
+    const pad = 60
+
+    const fitScale = Math.min(
+      (vw - pad * 2) / bw,
+      (vh - pad * 2) / bh,
+      1 // cap at 100%
+    )
+    const scale = Math.max(0.1, fitScale)
+
+    transform.scale = scale
+    transform.x = vw / 2 - cx * scale
+    transform.y = vh / 2 - cy * scale
   }
 
   function zoomIn() {
@@ -160,7 +207,8 @@ export function useCanvas(containerRef: Ref<HTMLElement | null>) {
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
-    resetView,
+    resetZoom,
+    fitAll,
     zoomIn,
     zoomOut,
   }

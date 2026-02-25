@@ -52,18 +52,24 @@
       <div
         v-if="note.link"
         class="note-link-icon"
-        :class="{ 'file-link': isFileLink }"
         @pointerdown.stop
         @click.stop="followLink"
         :title="linkTitle"
       >
-        <!-- File icon for local paths -->
-        <svg v-if="isFileLink" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
+        <!-- File: open-folder action icon -->
+        <svg v-if="isFileLink" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 19a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1" />
+          <path d="M20 14H9a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h9l3-5z" />
         </svg>
-        <!-- External link icon for URLs / page links -->
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <!-- Page link: internal page icon -->
+        <svg v-else-if="isPageLink" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" />
+          <path d="M14 2v5h5" />
+          <path d="M9 13h6" />
+          <path d="M9 17h3" />
+        </svg>
+        <!-- URL: external link icon -->
+        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
           <polyline points="15 3 21 3 21 9" />
           <line x1="10" y1="14" x2="21" y2="3" />
@@ -266,7 +272,7 @@ const noteStyle = computed(() => {
 
   if (noteColor.value) {
     style['--note-color'] = noteColor.value
-    style['--note-bg'] = noteColor.value + '30'
+    style['--note-bg'] = noteColor.value + '50'
     style['--note-border'] = noteColor.value + 'aa'
   }
 
@@ -443,12 +449,16 @@ const isFileLink = computed(() => {
   return isUrlLink.value && isLocalPath(props.note.link)
 })
 
+const isPageLink = computed(() => {
+  return !!props.note.link && !isUrlLink.value
+})
+
 const linkTitle = computed(() => {
   if (!props.note.link) return ''
   if (isFileLink.value) return `Open folder: ${props.note.link}`
   if (isUrlLink.value) return `Open: ${props.note.link}`
   const page = appStore.pageList.value.find(p => p.id === props.note.link)
-  return page ? `Go to: ${page.title}` : `Go to page`
+  return page ? `Go to: ${page.title}` : 'Linked page no longer exists (click to remove)'
 })
 
 function togglePagePicker() {
@@ -537,7 +547,19 @@ async function followLink() {
   } else if (isUrlLink.value) {
     await openExternal(props.note.link)
   } else {
-    appStore.navigateToPage(props.note.link)
+    // Page link — verify it still exists
+    const page = appStore.pageList.value.find(p => p.id === props.note.link)
+    if (page) {
+      appStore.navigateToPage(props.note.link)
+    } else {
+      // Dead link — clean it up
+      const before = history.snapshotNote(appStore.notes, props.note.id)!
+      props.note.link = ''
+      props.note.updatedAt = Date.now()
+      appStore.updateNote(props.note)
+      const after = history.snapshotNote(appStore.notes, props.note.id)!
+      history.push({ type: 'note-update', before, after })
+    }
   }
 }
 
@@ -757,7 +779,7 @@ function extractPlainText(content: any): string {
 <style>
 .note-outer {
   --note-color: var(--note-default-color);
-  --note-bg: color-mix(in srgb, var(--note-default-color) 15%, transparent);
+  --note-bg: color-mix(in srgb, var(--note-default-color) 25%, transparent);
   --note-border: color-mix(in srgb, var(--note-default-color) 60%, transparent);
 
   position: relative;
@@ -785,10 +807,7 @@ function extractPlainText(content: any): string {
   box-shadow: 0 0 0 2px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* File reference note — green left accent */
-.note-outer.file-note > .note-frame {
-  border-left: 3px solid rgba(76, 175, 80, 0.5);
-}
+/* File reference note — type bar now handles visual distinction */
 
 .note-outer.in-list {
   position: relative;
@@ -832,11 +851,11 @@ function extractPlainText(content: any): string {
 .node-type-bar {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
+  gap: 0.35em;
+  padding: 0.15em 0.5em;
   background: color-mix(in srgb, var(--note-color) 55%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--note-color) 30%, transparent);
-  font-size: 11px;
+  font-size: 0.7em;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -844,7 +863,7 @@ function extractPlainText(content: any): string {
   opacity: 0.85;
   user-select: none;
   flex-shrink: 0;
-  min-height: 20px;
+  min-height: 1.4em;
 }
 
 .node-type-bar svg {
@@ -873,7 +892,7 @@ function extractPlainText(content: any): string {
 /* Collapse toggle */
 .collapse-toggle {
   position: absolute;
-  top: 24px;  /* below the node-type-bar */
+  top: 1.5em;  /* below the node-type-bar, scales with UI */
   left: 2px;
   width: 20px;
   height: 20px;
@@ -897,34 +916,24 @@ function extractPlainText(content: any): string {
 /* Link icon */
 .note-link-icon {
   position: absolute;
-  top: 24px;  /* below the node-type-bar */
+  top: 1.5em;  /* below the node-type-bar, scales with UI */
   right: 3px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent-text);
+  color: var(--text-secondary);
   cursor: pointer;
   z-index: 10;
   border-radius: 4px;
-  background: rgba(33, 150, 243, 0.15);
+  background: transparent;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .note-link-icon:hover {
-  background: rgba(33, 150, 243, 0.3);
-  color: var(--accent-text);
-}
-
-.note-link-icon.file-link {
-  color: var(--file-accent);
-  background: rgba(76, 175, 80, 0.15);
-}
-
-.note-link-icon.file-link:hover {
-  background: rgba(76, 175, 80, 0.3);
-  color: var(--file-accent-light);
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }
 
 /* Context menu submenu */

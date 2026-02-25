@@ -76,7 +76,7 @@ const editor = useEditor({
   onUpdate: ({ editor }) => {
     suppressContentWatch = true
     props.note[props.sectionName].content = editor.getJSON()
-    appStore.debouncedSaveNote(props.note, 500)
+    appStore.markNoteDirty(props.note, 500)
     suppressContentWatch = false
   },
 })
@@ -136,7 +136,7 @@ onBeforeUnmount(() => {
 
 <style>
 .note-text-section {
-  padding: 8px 18px;
+  padding: 8px 28px 8px 18px;
   min-height: 1.6em;
 }
 

@@ -19,8 +19,19 @@ export function useResize(
 
   let beforeSnapshot: Note | null = null
 
+  function cleanupResize() {
+    window.removeEventListener('pointermove', handleResizeMove)
+    window.removeEventListener('pointerup', handleResizeEnd)
+    isResizing.value = false
+    resizeNote.value = null
+    beforeSnapshot = null
+  }
+
   function startResize(note: Note, handle: ResizeHandle, e: PointerEvent) {
     if (!note.resizable) return
+
+    // Kill any stuck resize
+    if (isResizing.value) cleanupResize()
 
     e.stopPropagation()
     e.preventDefault()
@@ -36,7 +47,6 @@ export function useResize(
     startWidth.value = noteEl?.offsetWidth ?? 200
     startHeight.value = noteEl?.offsetHeight ?? 100
 
-    // Capture before snapshot for undo
     beforeSnapshot = history.snapshotNote(appStore.notes, note.id)
 
     window.addEventListener('pointermove', handleResizeMove)
@@ -67,23 +77,22 @@ export function useResize(
   }
 
   function handleResizeEnd(e: PointerEvent) {
-    if (resizeNote.value && isResizing.value && beforeSnapshot) {
-      const afterSnapshot = history.snapshotNote(appStore.notes, resizeNote.value.id)!
-      appStore.pushResizeAction(resizeNote.value.id, beforeSnapshot, afterSnapshot)
-      appStore.debouncedSaveNote(resizeNote.value, 100)
+    const note = resizeNote.value
+    const snap = beforeSnapshot
+
+    cleanupResize()
+
+    if (note && snap) {
+      const afterSnapshot = history.snapshotNote(appStore.notes, note.id)!
+      appStore.pushResizeAction(note.id, snap, afterSnapshot)
+      appStore.markNoteDirty(note, 100)
     }
-
-    isResizing.value = false
-    resizeNote.value = null
-    beforeSnapshot = null
-
-    window.removeEventListener('pointermove', handleResizeMove)
-    window.removeEventListener('pointerup', handleResizeEnd)
   }
 
   return {
     isResizing,
     resizeNote,
     startResize,
+    cancelResize: cleanupResize,
   }
 }
