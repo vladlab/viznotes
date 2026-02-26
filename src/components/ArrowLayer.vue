@@ -119,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watchEffect, watch, toRaw } from 'vue'
+import { reactive, ref, computed, watchEffect, watch, toRaw, onMounted } from 'vue'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { settings } from '../stores/settings'
@@ -455,6 +455,17 @@ watch(() => appStore.dragSessionNoteIds.size, (newSize, oldSize) => {
     requestAnimationFrame(recomputeArrows)
   }
 })
+
+// Initial recompute after mount (arrows may already be loaded before ArrowLayer mounts)
+onMounted(() => {
+  requestAnimationFrame(recomputeArrows)
+})
+
+// Recompute after page navigation (arrows.size may not change between pages)
+watch(() => appStore.currentPageId.value, () => {
+  clearRectCache()
+  requestAnimationFrame(recomputeArrows)
+}, { flush: 'post' })
 
 // ── Connector handles on selected notes ──
 

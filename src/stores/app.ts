@@ -100,12 +100,25 @@ history.setApplySnapshot(async (action, direction) => {
   // Apply note snapshots
   for (const [id, snapshot] of Object.entries(noteSnaps)) {
     if (snapshot === null) {
+      // Delete
       notes.delete(id)
       await storage.deleteNotes([id])
     } else {
-      const restored = deepClone(snapshot)
-      notes.set(id, restored)
-      await persistNote(restored)
+      const existing = notes.get(id)
+      if (existing) {
+        // Note exists → merge diff (or full snapshot) into it
+        for (const [key, value] of Object.entries(snapshot)) {
+          ;(existing as any)[key] = deepClone(value)
+        }
+        await persistNote(existing)
+      } else if (history.isFullNote(snapshot)) {
+        // Note doesn't exist → must be a full Note for create/restore
+        const restored = deepClone(snapshot)
+        notes.set(id, restored)
+        await persistNote(restored)
+      } else {
+        console.warn(`[undo] Skipping partial snapshot for non-existent note: ${id}`)
+      }
     }
   }
 

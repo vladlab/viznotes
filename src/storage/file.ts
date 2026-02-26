@@ -157,6 +157,30 @@ export class FileStorage implements StorageBackend {
     for (const [pid, pn] of byPage) { const f = await this.ensurePageFile(pid); for (const n of pn) { const i = f.notes.findIndex(x => x.id === n.id); if (i >= 0) f.notes[i] = n; else f.notes.push(n) }; await this.writePageFile(pid, f) }
   }
 
+  async savePageBundle(page: Page, notes: Note[]) {
+    if (!page.id) page.id = nanoid()
+    const now = Date.now()
+    page.updatedAt = now
+    for (const n of notes) { if (!n.id) n.id = nanoid(); n.updatedAt = now }
+
+    // Read the page file once, apply both page metadata and note updates
+    const file = await this.ensurePageFile(page.id)
+    file.page = page
+    for (const n of notes) {
+      const i = file.notes.findIndex(x => x.id === n.id)
+      if (i >= 0) file.notes[i] = n; else file.notes.push(n)
+    }
+
+    // Single atomic write for both page + notes
+    await this.writePageFile(page.id, file)
+
+    // Update meta summary
+    const idx = this.meta.pages.findIndex(p => p.id === page.id)
+    const summary: PageSummary = { id: page.id, title: page.title, updatedAt: page.updatedAt }
+    if (idx >= 0) this.meta.pages[idx] = summary; else this.meta.pages.push(summary)
+    await this.writeMeta()
+  }
+
   async deleteNote(id: string) {
     for (const ps of this.meta.pages) { const f = await this.readPageFile(ps.id); if (!f) continue; const i = f.notes.findIndex(n => n.id === id); if (i >= 0) { f.notes.splice(i, 1); await this.writePageFile(ps.id, f); return } }
   }

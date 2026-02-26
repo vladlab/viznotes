@@ -288,10 +288,11 @@ function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'ce
 
   // Snapshot after and push undo
   const notesAfter = history.snapshotNotes(appStore.notes, noteIds)
+  const optimized = history.optimizeSnapshots(notesBefore, notesAfter)
   history.pushAction({
     description: `Align notes (${mode})`,
-    notesBefore,
-    notesAfter,
+    notesBefore: optimized.notesBefore,
+    notesAfter: optimized.notesAfter,
     rootIdsBefore: null,
     rootIdsAfter: null,
     selectionBefore: noteIds,
@@ -337,10 +338,11 @@ function distributeNotes(axis: 'horizontal' | 'vertical') {
 
   // Snapshot after and push undo
   const notesAfter = history.snapshotNotes(appStore.notes, noteIds)
+  const optimized = history.optimizeSnapshots(notesBefore, notesAfter)
   history.pushAction({
     description: `Distribute notes (${axis})`,
-    notesBefore,
-    notesAfter,
+    notesBefore: optimized.notesBefore,
+    notesAfter: optimized.notesAfter,
     rootIdsBefore: null,
     rootIdsAfter: null,
     selectionBefore: noteIds,
@@ -729,7 +731,7 @@ onUnmounted(() => {
   width: 100%;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   background: var(--bg-canvas);
   cursor: crosshair;
   outline: none;

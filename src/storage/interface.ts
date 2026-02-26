@@ -14,6 +14,7 @@ export interface StorageBackend {
   getNotes(ids: string[]): Promise<Note[]>
   saveNote(note: Note): Promise<Note>
   saveNotes(notes: Note[]): Promise<void>
+  savePageBundle(page: Page, notes: Note[]): Promise<void>
   deleteNote(id: string): Promise<void>
   deleteNotes(ids: string[]): Promise<void>
   getNotesForPage(pageId: string): Promise<Note[]>
