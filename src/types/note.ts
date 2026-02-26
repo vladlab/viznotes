@@ -42,8 +42,7 @@ export interface NoteTextSection {
 
 export interface NoteContainer {
   enabled: boolean
-  spatial: boolean     // true = free positioning, false = list
-  horizontal: boolean  // list direction when spatial=false
+  horizontal: boolean  // list direction: false = vertical, true = horizontal
   stretchChildren: boolean
   childIds: string[]
 }
@@ -103,7 +102,6 @@ export function createDefaultNote(
     },
     container: {
       enabled: false,
-      spatial: false,
       horizontal: false,
       stretchChildren: true,
       childIds: [],

@@ -111,9 +111,6 @@
           {{ note.container.enabled ? '✓ ' : '' }}Container
         </button>
         <div class="context-separator" />
-        <button v-if="note.container.enabled" @click="toggleSpatial">
-          {{ note.container.spatial ? '✓ ' : '' }}Spatial layout
-        </button>
         <button v-if="note.container.enabled" @click="toggleHorizontal">
           {{ note.container.horizontal ? '✓ ' : '' }}Horizontal list
         </button>
@@ -368,14 +365,6 @@ function toggleSection(section: 'body' | 'container') {
   props.note[section].enabled = !props.note[section].enabled
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, `Toggle ${section}`)
-  contextMenuVisible.value = false
-}
-
-function toggleSpatial() {
-  const before = history.snapshotNote(appStore.notes, props.note.id)!
-  props.note.container.spatial = !props.note.container.spatial
-  appStore.updateNote(props.note)
-  appStore.pushNotePropertyAction(props.note.id, before, 'Toggle spatial')
   contextMenuVisible.value = false
 }
 

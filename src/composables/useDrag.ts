@@ -68,12 +68,9 @@ export function useDrag(
     startClientPos.value = { x: e.clientX, y: e.clientY }
 
     originalEl = document.getElementById(`note-${note.id}`)
-    if (parentNoteId) {
-      const parent = appStore.notes.get(parentNoteId)
-      isSpatialDrag = parent?.container.spatial ?? false
-    } else {
-      isSpatialDrag = true
-    }
+    // Children inside containers always use list (ghost) drag.
+    // Only root-level canvas notes use spatial (position-based) drag.
+    isSpatialDrag = !parentNoteId
 
     // Capture before snapshots for all notes that will move
     draggedNotes = []

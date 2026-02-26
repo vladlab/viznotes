@@ -3,28 +3,12 @@
     v-if="note.container.enabled"
     class="note-container-section"
     :class="{
-      spatial: note.container.spatial,
-      horizontal: !note.container.spatial && note.container.horizontal,
-      vertical: !note.container.spatial && !note.container.horizontal,
+      horizontal: note.container.horizontal,
+      vertical: !note.container.horizontal,
     }"
     @dblclick.stop="onDoubleClick"
   >
     <div
-      v-if="note.container.spatial"
-      class="note-container-spatial"
-      :style="{ minHeight: '120px', position: 'relative' }"
-    >
-      <NoteComponent
-        v-for="childNote in childNotes"
-        :key="childNote.id"
-        :note="childNote"
-        :parentNoteId="note.id"
-        :depth="depth + 1"
-      />
-    </div>
-
-    <div
-      v-else
       class="note-container-list"
       :class="{ horizontal: note.container.horizontal }"
     >
@@ -72,7 +56,6 @@ function onDoubleClick(e: MouseEvent) {
   // Only create note if clicking on empty container area
   if (
     target.closest('.note-outer') &&
-    !target.classList.contains('note-container-spatial') &&
     !target.classList.contains('note-container-list') &&
     !target.classList.contains('note-container-section') &&
     !target.classList.contains('container-empty')
@@ -80,17 +63,7 @@ function onDoubleClick(e: MouseEvent) {
     return
   }
 
-  if (props.note.container.spatial) {
-    const container = target.closest('.note-container-spatial') as HTMLElement
-    if (container) {
-      const rect = container.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      appStore.createNote({ x, y }, props.note.id)
-    }
-  } else {
-    appStore.createNote({ x: 0, y: 0 }, props.note.id)
-  }
+  appStore.createNote({ x: 0, y: 0 }, props.note.id)
 }
 </script>
 
@@ -111,11 +84,6 @@ function onDoubleClick(e: MouseEvent) {
 
 .note-container-list.horizontal {
   flex-direction: row;
-}
-
-.note-container-spatial {
-  position: relative;
-  min-height: 120px;
 }
 
 .container-empty {
