@@ -34,6 +34,8 @@ import {
   persistPage,
   rebuildParentMap,
   dragSessionNoteIds,
+  dropInsertParentId,
+  dropInsertIndex,
 } from './state'
 
 // ── Selection ──
@@ -60,6 +62,7 @@ import {
   reparentNote,
   unparentNote,
   findParent,
+  reorderNote,
 } from './notes'
 
 // ── Arrows ──
@@ -197,6 +200,8 @@ export const appStore = {
   setArrowRecompute,
   triggerArrowRecompute,
   dragSessionNoteIds,
+  dropInsertParentId,
+  dropInsertIndex,
 
   // Computed
   rootNotes,
@@ -237,6 +242,7 @@ export const appStore = {
   pushNotePropertyAction,
   reparentNote,
   unparentNote,
+  reorderNote,
   findParent,
 
   // Arrows

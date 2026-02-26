@@ -51,6 +51,8 @@ export function useDrag(
     draggedNotes = []
     isSpatialDrag = true
     appStore.dragSessionNoteIds.clear()
+    appStore.dropInsertParentId.value = null
+    appStore.dropInsertIndex.value = -1
   }
 
   function startDrag(note: Note, parentNoteId: string | undefined, e: PointerEvent) {
@@ -98,10 +100,13 @@ export function useDrag(
     try { captureTarget.setPointerCapture(e.pointerId) } catch {}
     captureTarget.addEventListener('lostpointercapture', handleLostCapture)
 
-    // Track dragged notes for arrow rect caching
+    // Track dragged notes for arrow rect caching (spatial drags only —
+    // ghost drags don't move the real DOM element, so arrows stay put)
     appStore.dragSessionNoteIds.clear()
-    for (const dn of draggedNotes) {
-      appStore.dragSessionNoteIds.add(dn.note.id)
+    if (isSpatialDrag) {
+      for (const dn of draggedNotes) {
+        appStore.dragSessionNoteIds.add(dn.note.id)
+      }
     }
 
     window.addEventListener('pointermove', handleDragMove)
@@ -155,15 +160,15 @@ export function useDrag(
         dn.note.pos.x = dn.startPos.x + worldDx
         dn.note.pos.y = dn.startPos.y + worldDy
       }
+
+      // Trigger arrow recomputation (nextTick + rAF for guaranteed DOM read)
+      appStore.triggerArrowRecompute()
     } else {
       if (ghostEl) {
         ghostEl.style.left = `${e.clientX}px`
         ghostEl.style.top = `${e.clientY}px`
       }
     }
-
-    // Trigger arrow recomputation (nextTick + rAF for guaranteed DOM read)
-    appStore.triggerArrowRecompute()
 
     updateDropTarget(e)
   }
@@ -208,8 +213,63 @@ export function useDrag(
     const elemUnder = document.elementFromPoint(e.clientX, e.clientY)
     for (const el of hiddenEls) el.style.pointerEvents = ''
 
-    if (!elemUnder) { dropTargetId.value = null; return }
+    if (!elemUnder) {
+      dropTargetId.value = null
+      clearInsert()
+      return
+    }
 
+    // Check if cursor is inside a container list → reorder detection
+    const containerList = elemUnder.closest('.note-container-list')
+    if (containerList) {
+      const containerSection = containerList.closest('.note-container-section')
+      const parentOuter = containerSection?.closest('.note-outer')
+      if (parentOuter) {
+        const parentId = parentOuter.id?.replace('note-', '')
+        if (parentId) {
+          const parentNote = appStore.notes.get(parentId)
+          if (parentNote) {
+            // Compute insertion index from cursor Y relative to sibling centers
+            // Filter out the drop indicator element itself to avoid feedback loops
+            const children = Array.from(containerList.children).filter(
+              el => !el.classList.contains('container-drop-indicator')
+            ) as HTMLElement[]
+            let insertIdx = children.length
+            for (let i = 0; i < children.length; i++) {
+              const childRect = children[i].getBoundingClientRect()
+              const childCenter = childRect.top + childRect.height / 2
+              if (e.clientY < childCenter) {
+                insertIdx = i
+                break
+              }
+            }
+
+            // Map DOM index to childIds index (hidden dragged elements shift indices)
+            // Actually, we hid pointer-events but didn't remove from DOM, so DOM order = childIds order
+            // But the dragged note is still in the DOM (just invisible to hit-test)
+            // We need the index in terms of childIds including the dragged note
+            appStore.dropInsertParentId.value = parentId
+            appStore.dropInsertIndex.value = insertIdx
+
+            // If same parent, this is a reorder — don't set dropTargetId (that triggers reparent)
+            if (parentId === dragParentId.value) {
+              dropTargetId.value = null
+              return
+            } else {
+              // Different container — reparent into it
+              if (!isDescendantOfAny(parentId)) {
+                dropTargetId.value = parentId
+                return
+              }
+            }
+          }
+        }
+      }
+    }
+
+    clearInsert()
+
+    // Check if cursor is over a note with container → reparent target
     const noteOuter = elemUnder.closest('.note-outer')
     if (noteOuter) {
       const id = noteOuter.id?.replace('note-', '')
@@ -222,6 +282,11 @@ export function useDrag(
       }
     }
     dropTargetId.value = null
+  }
+
+  function clearInsert() {
+    appStore.dropInsertParentId.value = null
+    appStore.dropInsertIndex.value = -1
   }
 
   function isDescendantOfAny(potentialDescendantId: string): boolean {
@@ -245,6 +310,8 @@ export function useDrag(
     const note = dragNote.value
     const parentId = dragParentId.value
     const targetId = dropTargetId.value
+    const insertParentId = appStore.dropInsertParentId.value
+    const insertIndex = appStore.dropInsertIndex.value
     const moved = hasMoved.value
     const savedDraggedNotes = [...draggedNotes]
 
@@ -252,7 +319,10 @@ export function useDrag(
     cleanupDrag()
 
     if (note && moved) {
-      if (targetId) {
+      if (insertParentId && insertParentId === parentId && insertIndex >= 0) {
+        // Reorder within the same container
+        await appStore.reorderNote(note.id, parentId!, insertIndex)
+      } else if (targetId) {
         // Reparent all dragged notes into the target container
         for (const dn of savedDraggedNotes) {
           const dnParentId = dn.note.id === note.id ? parentId : appStore.findParent(dn.note.id)

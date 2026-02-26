@@ -5,13 +5,21 @@
     @dblclick.stop="onDoubleClick"
   >
     <div class="note-container-list">
-      <NoteComponent
-        v-for="childNote in childNotes"
-        :key="childNote.id"
-        :note="childNote"
-        :parentNoteId="note.id"
-        :depth="depth + 1"
-        :spatial="false"
+      <template v-for="(childNote, idx) in childNotes" :key="childNote.id">
+        <div
+          v-if="showInsertAt === idx"
+          class="container-drop-indicator"
+        />
+        <NoteComponent
+          :note="childNote"
+          :parentNoteId="note.id"
+          :depth="depth + 1"
+          :spatial="false"
+        />
+      </template>
+      <div
+        v-if="showInsertAt === childNotes.length"
+        class="container-drop-indicator"
       />
     </div>
 
@@ -39,6 +47,11 @@ const childNotes = computed(() => {
   return props.note.container.childIds
     .map(id => appStore.notes.get(id))
     .filter((n): n is Note => n !== undefined)
+})
+
+const showInsertAt = computed(() => {
+  if (appStore.dropInsertParentId.value !== props.note.id) return -1
+  return appStore.dropInsertIndex.value
 })
 
 function onDoubleClick(e: MouseEvent) {
@@ -79,5 +92,14 @@ function onDoubleClick(e: MouseEvent) {
   color: var(--text-faint);
   font-size: 0.75em;
   user-select: none;
+}
+
+.container-drop-indicator {
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: -1px 4px;
+  opacity: 0.8;
+  pointer-events: none;
 }
 </style>

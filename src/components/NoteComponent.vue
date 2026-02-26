@@ -4,6 +4,7 @@
     class="note-outer"
     :class="{
       collapsed: note.collapsed,
+      'collapsed-stack': note.collapsed && note.container.enabled && note.container.childIds.length > 0,
       'in-list': !spatial,
       'is-selected': isSelected,
       'is-editing': isEditing,
@@ -772,8 +773,8 @@ function extractPlainText(content: any): string {
 <style>
 .note-outer {
   --note-color: var(--note-default-color);
-  --note-bg: color-mix(in srgb, var(--note-default-color) 25%, transparent);
-  --note-border: color-mix(in srgb, var(--note-default-color) 60%, transparent);
+  --note-bg: color-mix(in srgb, var(--note-default-color) 25%, var(--bg-canvas));
+  --note-border: color-mix(in srgb, var(--note-default-color) 60%, var(--bg-canvas));
 
   position: relative;
   min-width: 80px;
@@ -838,6 +839,41 @@ function extractPlainText(content: any): string {
 .note-outer.is-editing > .note-frame {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* Collapsed container: stacked-card effect */
+.note-outer.collapsed-stack {
+  margin-bottom: 6px;  /* space for the pseudo-cards */
+  margin-right: 6px;
+}
+
+.note-outer.collapsed-stack > .note-frame {
+  z-index: 2;
+}
+
+.note-outer.collapsed-stack::before,
+.note-outer.collapsed-stack::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 6px;
+  border: 1.5px solid var(--note-border);
+  background: var(--note-bg);
+  pointer-events: none;
+}
+
+.note-outer.collapsed-stack::before {
+  z-index: 1;
+  transform: translate(3px, 3px);
+}
+
+.note-outer.collapsed-stack::after {
+  z-index: 0;
+  transform: translate(6px, 6px);
+  opacity: 0.6;
 }
 
 /* Node type header bar — Blender-style title strip */
