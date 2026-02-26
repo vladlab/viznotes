@@ -8,7 +8,7 @@
       'in-list': !spatial,
       'is-selected': isSelected,
       'is-editing': isEditing,
-      'is-dragging': isDragTarget,
+      'is-dragging': isDragVisual,
       'drop-target': isDropTarget,
       'file-note': isFileLink,
     }"
@@ -26,6 +26,34 @@
           </svg>
           <span class="node-type-label">{{ (NODE_TYPES[note.nodeType || 'default'] || NODE_TYPES.default).label }}</span>
         </template>
+
+        <!-- Link icon — right-aligned in header bar -->
+        <div
+          v-if="note.link"
+          class="note-link-icon"
+          @pointerdown.stop
+          @click.stop="followLink"
+          :title="linkTitle"
+        >
+          <!-- File: open-folder action icon -->
+          <svg v-if="isFileLink" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 19a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1" />
+            <path d="M20 14H9a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h9l3-5z" />
+          </svg>
+          <!-- Page link: internal page icon -->
+          <svg v-else-if="isPageLink" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" />
+            <path d="M14 2v5h5" />
+            <path d="M9 13h6" />
+            <path d="M9 17h3" />
+          </svg>
+          <!-- URL: external link icon -->
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </div>
       </div>
 
       <!-- Collapse toggle -->
@@ -48,34 +76,6 @@
           />
         </svg>
       </button>
-
-      <!-- Link icon — pointerdown.stop prevents note drag -->
-      <div
-        v-if="note.link"
-        class="note-link-icon"
-        @pointerdown.stop
-        @click.stop="followLink"
-        :title="linkTitle"
-      >
-        <!-- File: open-folder action icon -->
-        <svg v-if="isFileLink" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 19a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1" />
-          <path d="M20 14H9a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h9l3-5z" />
-        </svg>
-        <!-- Page link: internal page icon -->
-        <svg v-else-if="isPageLink" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" />
-          <path d="M14 2v5h5" />
-          <path d="M9 13h6" />
-          <path d="M9 17h3" />
-        </svg>
-        <!-- URL: external link icon -->
-        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
-      </div>
 
       <!-- Sections -->
       <NoteTextSection :note="note" sectionName="head" />
@@ -218,10 +218,12 @@ const startDrag = inject<(note: Note, parentNoteId: string | undefined, e: Point
 const startResize = inject<(note: Note, handle: ResizeHandle, e: PointerEvent) => void>('startResize', () => {})
 const dragTargetId = inject<{ value: string | null }>('dragTargetId', ref(null))
 const dropTargetId = inject<{ value: string | null }>('dropTargetId', ref(null))
+const isDraggingGlobal = inject<{ value: boolean }>('isDragging', ref(false))
 
 const isEditing = computed(() => appStore.editingNoteId.value === props.note.id)
 const isSelected = computed(() => appStore.selectedNoteIds.has(props.note.id))
 const isDragTarget = computed(() => dragTargetId.value === props.note.id)
+const isDragVisual = computed(() => isDragTarget.value && isDraggingGlobal.value)
 const isDropTarget = computed(() => dropTargetId.value === props.note.id)
 
 // Context menu
@@ -944,19 +946,17 @@ function extractPlainText(content: any): string {
 
 /* Link icon */
 .note-link-icon {
-  position: absolute;
-  top: 2.2em;  /* below the node-type-bar header */
-  right: 3px;
-  width: 24px;
-  height: 24px;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
   cursor: pointer;
-  z-index: 10;
-  border-radius: 4px;
+  border-radius: 3px;
   background: transparent;
+  flex-shrink: 0;
   transition: background 0.15s ease, color 0.15s ease;
 }
 

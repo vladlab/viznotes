@@ -352,6 +352,7 @@ const boxSelection = useBoxSelection()
 // Provide drag/resize and drag state to child notes
 provide('startDrag', drag.startDrag)
 provide('startResize', resize.startResize)
+provide('isDragging', drag.isDragging)
 provide('dragTargetId', drag.dragTargetId)
 provide('dropTargetId', drag.dropTargetId)
 
@@ -552,17 +553,17 @@ async function onFileDrop(_e: DragEvent) {
 
 const FILE_EMOJI_MAP: Record<string, string> = {
   // Video
-  mp4: '🎬', mkv: '🎬', mov: '🎬', avi: '🎬', wmv: '🎬', webm: '🎬',
-  mxf: '🎬', ts: '🎬', m2ts: '🎬', mts: '🎬', mpg: '🎬', mpeg: '🎬',
-  m4v: '🎬', flv: '🎬', ogv: '🎬', vob: '🎬', r3d: '🎬', braw: '🎬',
+  mp4: '🎞️', mkv: '🎞️', mov: '🎞️', avi: '🎞️', wmv: '🎞️', webm: '🎞️',
+  mxf: '🎞️', ts: '🎞️', m2ts: '🎞️', mts: '🎞️', mpg: '🎞️', mpeg: '🎞️',
+  m4v: '🎞️', flv: '🎞️', ogv: '🎞️', vob: '🎞️', r3d: '🎞️', braw: '🎞️',
   // Audio
   mp3: '🔊', wav: '🔊', flac: '🔊', aac: '🔊', ogg: '🔊', wma: '🔊',
   aiff: '🔊', aif: '🔊', m4a: '🔊', opus: '🔊', alac: '🔊',
   // Image
-  png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️', bmp: '🖼️',
-  tiff: '🖼️', tif: '🖼️', svg: '🖼️', ico: '🖼️', heic: '🖼️', heif: '🖼️',
-  exr: '🖼️', dpx: '🖼️', raw: '🖼️', cr2: '🖼️', nef: '🖼️', arw: '🖼️',
-  dng: '🖼️', psd: '🖼️',
+  png: '📷', jpg: '📷', jpeg: '📷', gif: '📷', webp: '📷', bmp: '📷',
+  tiff: '📷', tif: '📷', svg: '📷', ico: '📷', heic: '📷', heif: '📷',
+  exr: '📷', dpx: '📷', raw: '📷', cr2: '📷', nef: '📷', arw: '📷',
+  dng: '📷', psd: '📷',
   // Text / docs
   txt: '📝', md: '📝', rtf: '📝', csv: '📝', tsv: '📝', log: '📝',
   pdf: '📄', doc: '📄', docx: '📄', odt: '📄', pages: '📄',
@@ -626,13 +627,23 @@ async function createNotesFromDrop(
       if (lastSlash > 0) dirPath = filePath.substring(0, lastSlash)
     }
 
+    // Build head content: filename + directory path on separate lines
+    const headParagraphs: any[] = [
+      { type: 'paragraph', content: [{ type: 'text', marks: [{ type: 'bold' }], text: displayName }] },
+    ]
+    if (dirPath) {
+      headParagraphs.push(
+        { type: 'paragraph', content: [{ type: 'text', text: dirPath }] },
+      )
+    }
+
     const note = await appStore.createNote(notePos, undefined, {
-      initialText: displayName,
-      bodyText: dirPath || undefined,
+      headContent: { type: 'doc', content: headParagraphs },
       collapsed: false,
       link: filePath || undefined,
       nodeType: 'file',
       startEditing: false,
+      enableBody: true,
     })
 
     createdNoteIds.push(note.id)

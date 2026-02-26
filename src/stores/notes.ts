@@ -38,8 +38,10 @@ export async function createNote(
   parentNoteId?: string,
   options?: {
     initialText?: string;
+    headContent?: any;
     startEditing?: boolean;
     bodyText?: string;
+    enableBody?: boolean;
     collapsed?: boolean;
     link?: string;
     nodeType?: string;
@@ -57,8 +59,10 @@ export async function createNote(
   const note = createDefaultNote(currentPage.value.id, pos)
   note.zIndex = currentPage.value.nextZIndex++
 
-  // Set initial text in head section
-  if (options?.initialText) {
+  // Set head content: raw ProseMirror JSON takes priority over plain text
+  if (options?.headContent) {
+    note.head.content = options.headContent
+  } else if (options?.initialText) {
     note.head.content = {
       type: 'doc',
       content: [{
@@ -78,6 +82,8 @@ export async function createNote(
         content: [{ type: 'text', text: options.bodyText }]
       }]
     }
+  } else if (options?.enableBody) {
+    note.body.enabled = true
   }
 
   // Set collapsed state
