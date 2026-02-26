@@ -46,10 +46,10 @@ const DEFAULT_THEME_CSS = `/*
 
 /*
 [data-theme="paper"] {
-  --text-primary: #2c2c2c;
-  --bg-app: #ddd6c8;
-  --bg-canvas: #d5cec0;
-  --bg-sidebar: #d0c9bb;
+  --text-primary: #1a1a1a;
+  --bg-app: #898776;
+  --bg-canvas: #bab5a1;
+  --bg-sidebar: #888476;
 
   --note-grey: #8a8478;
   --note-red: #c92a2a;

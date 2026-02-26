@@ -111,9 +111,6 @@
           {{ note.container.enabled ? '✓ ' : '' }}Container
         </button>
         <div class="context-separator" />
-        <button v-if="note.container.enabled" @click="toggleHorizontal">
-          {{ note.container.horizontal ? '✓ ' : '' }}Horizontal list
-        </button>
         <div v-if="note.container.enabled" class="context-separator" />
         <div class="context-colors">
           <button
@@ -196,7 +193,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, inject } from 'vue'
+import { computed, ref, inject, onBeforeUnmount } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import { appStore } from '../stores/app'
@@ -326,6 +323,18 @@ function toggleCollapse() {
   appStore.pushNotePropertyAction(props.note.id, before, 'Toggle collapse')
 }
 
+let contextMenuCleanup: (() => void) | null = null
+
+function closeContextMenu() {
+  contextMenuVisible.value = false
+  pagePickerVisible.value = false
+  typePickerVisible.value = false
+  if (contextMenuCleanup) {
+    contextMenuCleanup()
+    contextMenuCleanup = null
+  }
+}
+
 function showContextMenu(e: MouseEvent) {
   if (!isSelected.value) {
     appStore.selectNote(props.note.id, false)
@@ -335,6 +344,9 @@ function showContextMenu(e: MouseEvent) {
   contextMenuVisible.value = true
   pagePickerVisible.value = false
   typePickerVisible.value = false
+
+  // Clean up any previous listeners
+  if (contextMenuCleanup) contextMenuCleanup()
 
   const close = (ev: Event) => {
     // Don't close if interacting with elements inside the context menu (except Escape)
@@ -348,32 +360,30 @@ function showContextMenu(e: MouseEvent) {
       if (menu && ev.target instanceof Node && menu.contains(ev.target)) return
     }
 
-    contextMenuVisible.value = false
-    pagePickerVisible.value = false
-    typePickerVisible.value = false
+    closeContextMenu()
+  }
+
+  contextMenuCleanup = () => {
     window.removeEventListener('pointerdown', close, true)
     window.removeEventListener('keydown', close)
   }
+
   setTimeout(() => {
     window.addEventListener('pointerdown', close, true)
     window.addEventListener('keydown', close)
   }, 0)
 }
 
+onBeforeUnmount(() => {
+  closeContextMenu()
+})
+
 function toggleSection(section: 'body' | 'container') {
   const before = history.snapshotNote(appStore.notes, props.note.id)!
   props.note[section].enabled = !props.note[section].enabled
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, `Toggle ${section}`)
-  contextMenuVisible.value = false
-}
-
-function toggleHorizontal() {
-  const before = history.snapshotNote(appStore.notes, props.note.id)!
-  props.note.container.horizontal = !props.note.container.horizontal
-  appStore.updateNote(props.note)
-  appStore.pushNotePropertyAction(props.note.id, before, 'Toggle horizontal')
-  contextMenuVisible.value = false
+  closeContextMenu()
 }
 
 function setColor(color: string) {
@@ -382,7 +392,7 @@ function setColor(color: string) {
   props.note.color.inherit = false
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Change color')
-  contextMenuVisible.value = false
+  closeContextMenu()
 }
 
 function resetSize() {
@@ -391,7 +401,7 @@ function resetSize() {
   props.note.height = 'auto'
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Reset size')
-  contextMenuVisible.value = false
+  closeContextMenu()
 }
 
 // Page picker
@@ -411,8 +421,7 @@ function setNodeType(typeKey: string) {
   props.note.nodeType = typeKey
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Change node type')
-  typePickerVisible.value = false
-  contextMenuVisible.value = false
+  closeContextMenu()
 }
 
 const availablePages = computed(() => {
@@ -465,8 +474,7 @@ function setPageLink(pageId: string) {
   }
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Set page link')
-  contextMenuVisible.value = false
-  pagePickerVisible.value = false
+  closeContextMenu()
 }
 
 function addUrlLink() {
@@ -477,7 +485,7 @@ function addUrlLink() {
     appStore.updateNote(props.note)
     appStore.pushNotePropertyAction(props.note.id, before, 'Set URL link')
   }
-  contextMenuVisible.value = false
+  closeContextMenu()
 }
 
 function removeLink() {
@@ -485,7 +493,7 @@ function removeLink() {
   props.note.link = ''
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Remove link')
-  contextMenuVisible.value = false
+  closeContextMenu()
 }
 
 function extractText(content: any): string {
@@ -498,7 +506,7 @@ function extractText(content: any): string {
 }
 
 async function convertToPage() {
-  contextMenuVisible.value = false
+  closeContextMenu()
 
   // Extract title from head section text
   const headText = extractText(props.note.head.content).trim()
@@ -549,7 +557,7 @@ async function followLink() {
 }
 
 function onDelete() {
-  contextMenuVisible.value = false
+  closeContextMenu()
   appStore.deleteNote(props.note.id, props.parentNoteId)
 }
 
@@ -558,7 +566,7 @@ const analyzing = ref(false)
 async function analyzeFile() {
   if (!isFileLink.value || analyzing.value) return
   analyzing.value = true
-  contextMenuVisible.value = false
+  closeContextMenu()
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
@@ -877,7 +885,7 @@ function extractPlainText(content: any): string {
 /* Collapse toggle */
 .collapse-toggle {
   position: absolute;
-  top: 1.5em;  /* below the node-type-bar, scales with UI */
+  top: 2.2em;  /* below the node-type-bar header */
   left: 2px;
   width: 20px;
   height: 20px;
@@ -901,7 +909,7 @@ function extractPlainText(content: any): string {
 /* Link icon */
 .note-link-icon {
   position: absolute;
-  top: 1.5em;  /* below the node-type-bar, scales with UI */
+  top: 2.2em;  /* below the node-type-bar header */
   right: 3px;
   width: 24px;
   height: 24px;

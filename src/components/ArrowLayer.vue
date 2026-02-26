@@ -119,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watchEffect, watch, toRaw, onMounted } from 'vue'
+import { reactive, ref, computed, watchEffect, watch, toRaw, onMounted, onBeforeUnmount } from 'vue'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { settings } from '../stores/settings'
@@ -158,6 +158,16 @@ const contextMenu = reactive({
   arrowDashed: false,
 })
 
+let arrowMenuCleanup: (() => void) | null = null
+
+function closeArrowContextMenu() {
+  contextMenu.visible = false
+  if (arrowMenuCleanup) {
+    arrowMenuCleanup()
+    arrowMenuCleanup = null
+  }
+}
+
 function onArrowContextMenu(arrowId: string, e: MouseEvent) {
   const arrow = appStore.arrows.get(arrowId)
   if (!arrow) return
@@ -175,16 +185,22 @@ function onArrowContextMenu(arrowId: string, e: MouseEvent) {
   contextMenu.y = e.clientY
   contextMenu.visible = true
 
+  if (arrowMenuCleanup) arrowMenuCleanup()
+
   const close = (ev: Event) => {
     if (ev.type === 'pointerdown') {
       const menu = document.querySelector('.arrow-context-menu')
       if (menu && ev.target instanceof Node && menu.contains(ev.target)) return
     }
     if (ev instanceof KeyboardEvent && ev.key !== 'Escape') return
-    contextMenu.visible = false
+    closeArrowContextMenu()
+  }
+
+  arrowMenuCleanup = () => {
     window.removeEventListener('pointerdown', close, true)
     window.removeEventListener('keydown', close)
   }
+
   setTimeout(() => {
     window.addEventListener('pointerdown', close, true)
     window.addEventListener('keydown', close)
@@ -212,7 +228,7 @@ function toggleArrowDashed() {
 }
 
 async function deleteContextArrow() {
-  contextMenu.visible = false
+  closeArrowContextMenu()
   await appStore.deleteArrow(contextMenu.arrowId)
   selectedArrowIds.delete(contextMenu.arrowId)
 }
@@ -461,6 +477,11 @@ onMounted(() => {
   requestAnimationFrame(recomputeArrows)
 })
 
+onBeforeUnmount(() => {
+  closeArrowContextMenu()
+  cleanupArrowDrag()
+})
+
 // Recompute after page navigation (arrows.size may not change between pages)
 watch(() => appStore.currentPageId.value, () => {
   clearRectCache()
@@ -568,6 +589,22 @@ function handleDragMove(ev: PointerEvent) {
     dragging.path = `M${world.x},${world.y} C${world.x},${world.y} ${fp.x + d.dx * curve},${fp.y + d.dy * curve} ${fp.x},${fp.y}`
   }
   dragging.headPath = headPathFromCubic(dragging.path)
+}
+
+// Track reconnect-check listeners so they can be cleaned up on unmount
+let reconnectCheckCleanup: (() => void) | null = null
+
+function cleanupArrowDrag() {
+  window.removeEventListener('pointermove', handleDragMove)
+  window.removeEventListener('pointerup', handleDragUp)
+  if (reconnectCheckCleanup) {
+    reconnectCheckCleanup()
+    reconnectCheckCleanup = null
+  }
+  dragging.active = false
+  dragging.path = ''
+  dragging.headPath = ''
+  targetSnapPoints.value = []
 }
 
 async function handleDragUp(ev: PointerEvent) {
@@ -705,6 +742,7 @@ function onArrowPointerDown(arrowId: string, e: PointerEvent) {
         moved = true
         window.removeEventListener('pointermove', checkMove)
         window.removeEventListener('pointerup', checkUp)
+        reconnectCheckCleanup = null
 
         // Determine which end to detach (closest to click, or if both close, the nearest)
         const detachSource = nearSource && (!nearTarget || distSource <= distTarget)
@@ -722,10 +760,16 @@ function onArrowPointerDown(arrowId: string, e: PointerEvent) {
     const checkUp = () => {
       window.removeEventListener('pointermove', checkMove)
       window.removeEventListener('pointerup', checkUp)
+      reconnectCheckCleanup = null
       if (!moved) {
         // Just a click — select
         selectArrowClick(arrowId, e)
       }
+    }
+
+    reconnectCheckCleanup = () => {
+      window.removeEventListener('pointermove', checkMove)
+      window.removeEventListener('pointerup', checkUp)
     }
 
     window.addEventListener('pointermove', checkMove)

@@ -2,16 +2,9 @@
   <div
     v-if="note.container.enabled"
     class="note-container-section"
-    :class="{
-      horizontal: note.container.horizontal,
-      vertical: !note.container.horizontal,
-    }"
     @dblclick.stop="onDoubleClick"
   >
-    <div
-      class="note-container-list"
-      :class="{ horizontal: note.container.horizontal }"
-    >
+    <div class="note-container-list">
       <NoteComponent
         v-for="childNote in childNotes"
         :key="childNote.id"
@@ -49,11 +42,9 @@ const childNotes = computed(() => {
 })
 
 function onDoubleClick(e: MouseEvent) {
-  // Prevent propagation so it doesn't trigger parent note's dblclick
   e.stopPropagation()
 
   const target = e.target as HTMLElement
-  // Only create note if clicking on empty container area
   if (
     target.closest('.note-outer') &&
     !target.classList.contains('note-container-list') &&
@@ -80,10 +71,6 @@ function onDoubleClick(e: MouseEvent) {
   flex-direction: column;
   gap: 2px;
   padding: 4px;
-}
-
-.note-container-list.horizontal {
-  flex-direction: row;
 }
 
 .container-empty {

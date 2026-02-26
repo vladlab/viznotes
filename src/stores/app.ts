@@ -134,6 +134,24 @@ history.setApplySnapshot(async (action, direction) => {
     }
   }
 
+  // Clean up orphaned arrows — any arrow whose source or target note
+  // no longer exists after this undo/redo step. This handles the case
+  // where note creation and arrow creation are separate undo actions:
+  // undoing the note leaves the arrow dangling.
+  const orphanedIds: string[] = []
+  for (const [id, arrow] of arrows) {
+    if (!notes.has(arrow.sourceNoteId) || !notes.has(arrow.targetNoteId)) {
+      orphanedIds.push(id)
+    }
+  }
+  if (orphanedIds.length > 0) {
+    for (const id of orphanedIds) {
+      arrows.delete(id)
+      selectedArrowIds.delete(id)
+    }
+    await storage.deleteArrows(orphanedIds)
+  }
+
   // Apply root IDs
   if (rootIds !== null && currentPage.value) {
     currentPage.value.rootNoteIds = [...rootIds]

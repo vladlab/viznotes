@@ -126,13 +126,6 @@
       :transformCSS="canvas.transformCSS.value"
     />
 
-    <!-- Minimap -->
-    <Minimap
-      :transform="canvas.transform"
-      :containerWidth="containerWidth"
-      :containerHeight="containerHeight"
-      @pan="onMinimapPan"
-    />
 
     <!-- File drop zone overlay -->
     <div v-if="fileDropActive" class="file-drop-overlay">
@@ -163,7 +156,6 @@ import { settings } from '../stores/settings'
 import { loadUserTheme } from '../utils/themeLoader'
 import NoteComponent from './NoteComponent.vue'
 import ArrowLayer from './ArrowLayer.vue'
-import Minimap from './Minimap.vue'
 
 const containerRef = ref<HTMLElement | null>(null)
 const spaceHeld = ref(false)
@@ -558,6 +550,40 @@ async function onFileDrop(_e: DragEvent) {
   // File drops are handled by the Tauri event listener
 }
 
+const FILE_EMOJI_MAP: Record<string, string> = {
+  // Video
+  mp4: '🎬', mkv: '🎬', mov: '🎬', avi: '🎬', wmv: '🎬', webm: '🎬',
+  mxf: '🎬', ts: '🎬', m2ts: '🎬', mts: '🎬', mpg: '🎬', mpeg: '🎬',
+  m4v: '🎬', flv: '🎬', ogv: '🎬', vob: '🎬', r3d: '🎬', braw: '🎬',
+  // Audio
+  mp3: '🔊', wav: '🔊', flac: '🔊', aac: '🔊', ogg: '🔊', wma: '🔊',
+  aiff: '🔊', aif: '🔊', m4a: '🔊', opus: '🔊', alac: '🔊',
+  // Image
+  png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️', bmp: '🖼️',
+  tiff: '🖼️', tif: '🖼️', svg: '🖼️', ico: '🖼️', heic: '🖼️', heif: '🖼️',
+  exr: '🖼️', dpx: '🖼️', raw: '🖼️', cr2: '🖼️', nef: '🖼️', arw: '🖼️',
+  dng: '🖼️', psd: '🖼️',
+  // Text / docs
+  txt: '📝', md: '📝', rtf: '📝', csv: '📝', tsv: '📝', log: '📝',
+  pdf: '📄', doc: '📄', docx: '📄', odt: '📄', pages: '📄',
+  xls: '📊', xlsx: '📊', ods: '📊',
+  ppt: '📊', pptx: '📊', odp: '📊', key: '📊',
+  // Code
+  js: '💻', py: '💻', rs: '💻', c: '💻', cpp: '💻', h: '💻',
+  java: '💻', go: '💻', rb: '💻', sh: '💻', html: '💻', css: '💻',
+  json: '💻', xml: '💻', yaml: '💻', yml: '💻', toml: '💻', nix: '💻',
+  // Archive
+  zip: '📦', tar: '📦', gz: '📦', bz2: '📦', xz: '📦', '7z': '📦',
+  rar: '📦', zst: '📦',
+}
+
+function fileEmoji(filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  if (dot < 0) return '📎'
+  const ext = filename.slice(dot + 1).toLowerCase()
+  return FILE_EMOJI_MAP[ext] || '📎'
+}
+
 async function createNotesFromDrop(
   clientX: number, clientY: number,
   names: string[], fullPaths: string[] | null,
@@ -590,7 +616,7 @@ async function createNotesFromDrop(
       } catch {}
     }
 
-    const displayName = isFolder ? `📁 ${names[i]}` : names[i]
+    const displayName = isFolder ? `📁 ${names[i]}` : `${fileEmoji(names[i])} ${names[i]}`
     const filePath = fullPaths?.[i] || ''
 
     // Extract directory path (strip filename)
@@ -619,11 +645,7 @@ async function createNotesFromDrop(
 }
 
 let resizeObserver: ResizeObserver | null = null
-
-function onMinimapPan(x: number, y: number) {
-  canvas.transform.x = x
-  canvas.transform.y = y
-}
+let unlistenDragDrop: (() => void) | null = null
 
 // ── Per-page viewport memory ──
 const pageViewports = new Map<string, { x: number; y: number; scale: number }>()
@@ -680,7 +702,7 @@ onMounted(async () => {
     })
   })
 
-  // Track container size for minimap
+  // Track container size for viewport calculations
   if (containerRef.value) {
     containerWidth.value = containerRef.value.clientWidth
     containerHeight.value = containerRef.value.clientHeight
@@ -696,7 +718,7 @@ onMounted(async () => {
   try {
     const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow')
     const webview = getCurrentWebviewWindow()
-    webview.onDragDropEvent((event) => {
+    unlistenDragDrop = await webview.onDragDropEvent((event) => {
       if (event.payload.type === 'enter' || event.payload.type === 'over') {
         fileDropActive.value = true
         lastDragClientX = event.payload.position.x / window.devicePixelRatio
@@ -722,6 +744,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  unlistenDragDrop?.()
 })
 </script>
 

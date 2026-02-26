@@ -43,10 +43,6 @@
   --shadow-menu: 0 8px 32px rgba(0, 0, 0, 0.5);
   --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.4);
 
-  --minimap-bg: rgba(20, 20, 20, 0.85);
-  --minimap-border: #3a3a3a;
-  --minimap-viewport-fill: rgba(66, 165, 245, 0.08);
-  --minimap-viewport-stroke: rgba(66, 165, 245, 0.5);
 
   --file-accent: #a5d6a7;
   --file-accent-light: #c8e6c9;
@@ -70,23 +66,26 @@
 }
 
 [data-theme="paper"] {
-  --bg-app: #ddd6c8;
-  --bg-sidebar: #d0c9bb;
-  --bg-surface: #e8e2d6;
-  --bg-surface-hover: rgba(0, 0, 0, 0.04);
-  --bg-input: #e0dace;
-  --bg-canvas: #d5cec0;
+  /* Backgrounds */
+  --bg-app: #898776;
+  --bg-canvas: #bab5a1;
+  --bg-sidebar: #888476;
+  --bg-surface: #9e9b8a;
+  --bg-surface-hover: rgba(255, 255, 255, 0.08);
+  --bg-input: #7d7a6a;
 
-  --border-main: #b8b0a0;
-  --border-subtle: #c5bead;
-  --border-input: #c0b8a8;
-  --border-input-focus: #a09888;
-
-  --text-primary: #2c2c2c;
-  --text-secondary: #444;
-  --text-muted: #777;
-  --text-faint: #999;
+  /* Text */
+  --text-primary: #1a1a1a;
+  --text-secondary: #000000;
+  --text-muted: #3a372f;
+  --text-faint: #46443e;
   --text-heading: #1a1a1a;
+
+  /* Borders */
+  --border-main: #706e60;
+  --border-subtle: #7a7768;
+  --border-input: #6e6b5c;
+  --border-input-focus: #a09888;
 
   --accent: #4a7fb5;
   --accent-bg: rgba(74, 127, 181, 0.15);
@@ -99,22 +98,21 @@
   --note-bg-alpha: 40;
   --note-border-alpha: 88;
 
-  --canvas-dot: rgba(0, 0, 0, 0.08);
+  --canvas-dot: rgba(0, 0, 0, 0.10);
   --canvas-grid-size: 24px;
 
-  --format-bar-bg: #cdc6b8;
-  --controls-bg: #e0d9cb;
+  /* UI surfaces */
+  --format-bar-bg: #7d7a6a;
+  --controls-bg: #858272;
 
-  --scrollbar-thumb: #b5ad9d;
-  --scrollbar-hover: #a09888;
+  /* Scrollbar */
+  --scrollbar-thumb: #6e6b5c;
+  --scrollbar-hover: #5e5c4e;
 
-  --shadow-menu: 0 8px 32px rgba(0, 0, 0, 0.15);
+  /* Shadows */
+  --shadow-menu: 0 8px 32px rgba(0, 0, 0, 0.3);
   --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.12);
 
-  --minimap-bg: rgba(213, 206, 192, 0.92);
-  --minimap-border: #b8b0a0;
-  --minimap-viewport-fill: rgba(74, 127, 181, 0.1);
-  --minimap-viewport-stroke: rgba(74, 127, 181, 0.5);
 
   --file-accent: #4a8a4f;
   --file-accent-light: #5c9e61;
@@ -135,4 +133,8 @@
   --note-blue: #1864ab;
   --note-purple: #5f3dc4;
   --note-pink: #a61e4d;
+}
+
+[data-theme="paper"] .page-title {
+  font-weight: 600;
 }

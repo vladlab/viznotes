@@ -42,7 +42,6 @@ export interface NoteTextSection {
 
 export interface NoteContainer {
   enabled: boolean
-  horizontal: boolean  // list direction: false = vertical, true = horizontal
   stretchChildren: boolean
   childIds: string[]
 }
@@ -102,7 +101,6 @@ export function createDefaultNote(
     },
     container: {
       enabled: false,
-      horizontal: false,
       stretchChildren: true,
       childIds: [],
     },
