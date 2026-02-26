@@ -28,8 +28,8 @@
   --danger-text: #ef9a9a;
 
   --note-default-color: var(--note-grey, #4a4a4a);
-  --note-bg-alpha: 30;
-  --note-border-alpha: aa;
+  --note-bg-base: #2e2e2e;
+  --note-border-base: #444;
 
   --canvas-dot: rgba(255, 255, 255, 0.06);
   --canvas-grid-size: 24px;
@@ -95,8 +95,8 @@
   --danger-text: #c0392b;
 
   --note-default-color: var(--note-grey, #8a8478);
-  --note-bg-alpha: 40;
-  --note-border-alpha: 88;
+  --note-bg-base: #a8a593;
+  --note-border-base: #8a8778;
 
   --canvas-dot: rgba(0, 0, 0, 0.10);
   --canvas-grid-size: 24px;

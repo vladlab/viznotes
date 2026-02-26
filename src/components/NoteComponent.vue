@@ -267,8 +267,8 @@ const noteStyle = computed(() => {
 
   if (noteColor.value) {
     style['--note-color'] = noteColor.value
-    style['--note-bg'] = noteColor.value + '50'
-    style['--note-border'] = noteColor.value + 'aa'
+    style['--note-bg'] = `color-mix(in srgb, ${noteColor.value} 15%, var(--note-bg-base))`
+    style['--note-border'] = `color-mix(in srgb, ${noteColor.value} 30%, var(--note-border-base))`
   }
 
   return style
@@ -773,8 +773,8 @@ function extractPlainText(content: any): string {
 <style>
 .note-outer {
   --note-color: var(--note-default-color);
-  --note-bg: color-mix(in srgb, var(--note-default-color) 25%, var(--bg-canvas));
-  --note-border: color-mix(in srgb, var(--note-default-color) 60%, var(--bg-canvas));
+  --note-bg: color-mix(in srgb, var(--note-color) 15%, var(--note-bg-base));
+  --note-border: color-mix(in srgb, var(--note-color) 30%, var(--note-border-base));
 
   position: relative;
   min-width: 80px;
