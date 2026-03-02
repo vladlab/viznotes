@@ -666,6 +666,14 @@ function onKeyDown(e: KeyboardEvent) {
         fitAllNotes()
       }
       break
+
+    case 'l':
+      if (!isCtrl && appStore.selectedNoteIds.size === 1) {
+        e.preventDefault()
+        const noteId = Array.from(appStore.selectedNoteIds)[0]
+        appStore.startLinking(noteId)
+      }
+      break
   }
 }
 
