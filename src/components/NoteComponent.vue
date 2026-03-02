@@ -94,8 +94,8 @@
         <NoteTextSection :note="note" sectionName="body" />
         <div v-if="note.body.enabled && note.container.enabled" class="note-divider" />
         <NoteContainer :note="note" :depth="depth" />
-        <NoteLinks :note="note" />
       </template>
+      <NoteLinks :note="note" />
     </div>
 
     <!-- Resize handles (spatial, selected, not editing) -->
