@@ -28,6 +28,14 @@
         </template>
 
         <!-- Link icon — right-aligned in header bar -->
+        <button
+          v-if="note.container.enabled"
+          class="container-add-btn"
+          @pointerdown.stop
+          @click.stop="addToContainer"
+          title="Add note to container"
+        >+</button>
+
         <div
           v-if="note.link"
           class="note-link-icon"
@@ -324,6 +332,32 @@ function toggleCollapse() {
   props.note.collapsed = !props.note.collapsed
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Toggle collapse')
+}
+
+function addToContainer() {
+  if (!props.note.container.enabled) return
+  const isColumns = (props.note.container.layout || 'list') === 'columns'
+
+  if (isColumns) {
+    appStore.createNote({ x: 0, y: 0 }, props.note.id, {
+      startEditing: true,
+      enableBody: false,
+    }).then(note => {
+      note.container.enabled = true
+      note.container.layout = 'list'
+      appStore.updateNote(note)
+    })
+  } else {
+    appStore.createNote({ x: 0, y: 0 }, props.note.id)
+  }
+
+  // Auto-expand if collapsed
+  if (props.note.collapsed) {
+    const before = history.snapshotNote(appStore.notes, props.note.id)!
+    props.note.collapsed = false
+    appStore.updateNote(props.note)
+    appStore.pushNotePropertyAction(props.note.id, before, 'Expand container')
+  }
 }
 
 let contextMenuCleanup: (() => void) | null = null
@@ -900,6 +934,29 @@ function extractPlainText(content: any): string {
 .node-type-bar svg {
   opacity: 0.7;
   flex-shrink: 0;
+}
+
+.container-add-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 1.3em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.3em;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.container-add-btn:hover {
+  opacity: 0.9;
+}
+
+/* When both + and link icon exist, only link gets margin-left:auto */
+.container-add-btn + .note-link-icon {
+  margin-left: 0;
 }
 
 .node-type-label {

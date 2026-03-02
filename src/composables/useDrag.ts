@@ -229,18 +229,30 @@ export function useDrag(
         if (parentId) {
           const parentNote = appStore.notes.get(parentId)
           if (parentNote) {
-            // Compute insertion index from cursor Y relative to sibling centers
-            // Filter out the drop indicator element itself to avoid feedback loops
+            // Compute insertion index from cursor position relative to sibling centers
+            // Filter out drop indicator elements to avoid feedback loops
+            const isColumnsLayout = (parentNote.container.layout || 'list') === 'columns'
             const children = Array.from(containerList.children).filter(
-              el => !el.classList.contains('container-drop-indicator')
+              el => !el.classList.contains('container-drop-indicator') &&
+                    !el.classList.contains('container-column-drop-indicator')
             ) as HTMLElement[]
             let insertIdx = children.length
             for (let i = 0; i < children.length; i++) {
               const childRect = children[i].getBoundingClientRect()
-              const childCenter = childRect.top + childRect.height / 2
-              if (e.clientY < childCenter) {
-                insertIdx = i
-                break
+              if (isColumnsLayout) {
+                // Columns: compare X positions
+                const childCenter = childRect.left + childRect.width / 2
+                if (e.clientX < childCenter) {
+                  insertIdx = i
+                  break
+                }
+              } else {
+                // List: compare Y positions
+                const childCenter = childRect.top + childRect.height / 2
+                if (e.clientY < childCenter) {
+                  insertIdx = i
+                  break
+                }
               }
             }
 

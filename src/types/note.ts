@@ -43,6 +43,7 @@ export interface NoteTextSection {
 export interface NoteContainer {
   enabled: boolean
   stretchChildren: boolean
+  layout: 'list' | 'columns'
   childIds: string[]
 }
 
@@ -102,6 +103,7 @@ export function createDefaultNote(
     container: {
       enabled: false,
       stretchChildren: true,
+      layout: 'list',
       childIds: [],
     },
 

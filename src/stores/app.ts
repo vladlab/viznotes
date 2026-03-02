@@ -82,6 +82,9 @@ import {
   duplicateNotes,
 } from './clipboard'
 
+// ── Generators ──
+import { generateWeek } from './generators'
+
 // ── Pages ──
 import {
   loadPageList,
@@ -269,6 +272,9 @@ export const appStore = {
   // Data
   exportData,
   importData,
+
+  // Generators
+  generateWeek,
 
   // History
   undo: history.undo,

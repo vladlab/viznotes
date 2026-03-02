@@ -14,6 +14,7 @@
     @dragover.prevent="onDragOver"
     @dragleave="onDragLeave"
     @drop.prevent="onFileDrop"
+    @contextmenu.prevent="onCanvasContextMenu"
   >
     <!-- Dot grid background -->
     <div class="canvas-grid" :style="gridStyle" />
@@ -139,6 +140,20 @@
         <span>Drop files to create notes</span>
       </div>
     </div>
+
+    <!-- Canvas context menu -->
+    <Teleport to="body">
+      <div
+        v-if="canvasMenuVisible"
+        class="context-menu"
+        :style="{ left: `${canvasMenuPos.x}px`, top: `${canvasMenuPos.y}px` }"
+        @pointerdown.stop
+      >
+        <button @click="canvasMenuCreateNote">New note</button>
+        <div class="context-separator" />
+        <button @click="canvasMenuGenerateWeek">Insert week view…</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -160,6 +175,11 @@ import ArrowLayer from './ArrowLayer.vue'
 const containerRef = ref<HTMLElement | null>(null)
 const spaceHeld = ref(false)
 const fileDropActive = ref(false)
+
+// Canvas context menu
+const canvasMenuVisible = ref(false)
+const canvasMenuPos = ref({ x: 0, y: 0 })
+const canvasMenuWorldPos = ref({ x: 0, y: 0 })
 let lastDragClientX = 0
 let lastDragClientY = 0
 const containerWidth = ref(800)
@@ -440,6 +460,67 @@ function onDoubleClick(e: MouseEvent) {
     const worldPos = canvas.clientToWorld(e.clientX, e.clientY)
     appStore.createNote(worldPos)
   }
+}
+
+// ── Canvas context menu ──
+
+let canvasMenuCleanup: (() => void) | null = null
+
+function closeCanvasMenu() {
+  canvasMenuVisible.value = false
+  if (canvasMenuCleanup) { canvasMenuCleanup(); canvasMenuCleanup = null }
+}
+
+function onCanvasContextMenu(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!isCanvasBackground(target)) return
+
+  canvasMenuPos.value = { x: e.clientX, y: e.clientY }
+  canvasMenuWorldPos.value = canvas.clientToWorld(e.clientX, e.clientY)
+  canvasMenuVisible.value = true
+
+  if (canvasMenuCleanup) canvasMenuCleanup()
+
+  const close = (ev: Event) => {
+    if (ev.type === 'pointerdown') {
+      const menu = document.querySelector('.context-menu')
+      if (menu && ev.target instanceof Node && menu.contains(ev.target)) return
+    }
+    closeCanvasMenu()
+  }
+
+  canvasMenuCleanup = () => {
+    window.removeEventListener('pointerdown', close, true)
+    window.removeEventListener('keydown', close)
+  }
+
+  setTimeout(() => {
+    window.addEventListener('pointerdown', close, true)
+    window.addEventListener('keydown', close)
+  }, 0)
+}
+
+function canvasMenuCreateNote() {
+  const pos = { ...canvasMenuWorldPos.value }
+  closeCanvasMenu()
+  appStore.createNote(pos)
+}
+
+async function canvasMenuGenerateWeek() {
+  const pos = { ...canvasMenuWorldPos.value }
+  closeCanvasMenu()
+
+  // Prompt for date — default to current week
+  const input = prompt('Week of (YYYY-MM-DD):', new Date().toISOString().slice(0, 10))
+  if (input === null) return
+
+  const date = new Date(input + 'T00:00:00')
+  if (isNaN(date.getTime())) {
+    alert('Invalid date format. Use YYYY-MM-DD.')
+    return
+  }
+
+  await appStore.generateWeek(pos, date)
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -788,6 +869,7 @@ onMounted(async () => {
 onUnmounted(() => {
   resizeObserver?.disconnect()
   unlistenDragDrop?.()
+  closeCanvasMenu()
 })
 </script>
 

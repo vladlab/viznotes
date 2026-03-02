@@ -2,13 +2,18 @@
   <div
     v-if="note.container.enabled"
     class="note-container-section"
+    :class="{ 'columns-layout': isColumns }"
     @dblclick.stop="onDoubleClick"
   >
-    <div class="note-container-list">
+    <div class="note-container-list" :class="{ 'columns-row': isColumns }">
       <template v-for="(childNote, idx) in childNotes" :key="childNote.id">
         <div
-          v-if="showInsertAt === idx"
+          v-if="!isColumns && showInsertAt === idx"
           class="container-drop-indicator"
+        />
+        <div
+          v-if="isColumns && showInsertAt === idx"
+          class="container-column-drop-indicator"
         />
         <NoteComponent
           :note="childNote"
@@ -18,8 +23,12 @@
         />
       </template>
       <div
-        v-if="showInsertAt === childNotes.length"
+        v-if="!isColumns && showInsertAt === childNotes.length"
         class="container-drop-indicator"
+      />
+      <div
+        v-if="isColumns && showInsertAt === childNotes.length"
+        class="container-column-drop-indicator"
       />
     </div>
 
@@ -27,7 +36,7 @@
       v-if="childNotes.length === 0"
       class="container-empty"
     >
-      Double-click to add a note
+      Double-click to add a {{ isColumns ? 'column' : 'note' }}
     </div>
   </div>
 </template>
@@ -42,6 +51,8 @@ const props = defineProps<{
   note: Note
   depth: number
 }>()
+
+const isColumns = computed(() => (props.note.container.layout || 'list') === 'columns')
 
 const childNotes = computed(() => {
   return props.note.container.childIds
@@ -67,7 +78,19 @@ function onDoubleClick(e: MouseEvent) {
     return
   }
 
-  appStore.createNote({ x: 0, y: 0 }, props.note.id)
+  // For columns layout, new children default to being containers themselves
+  if (isColumns.value) {
+    appStore.createNote({ x: 0, y: 0 }, props.note.id, {
+      startEditing: true,
+      enableBody: false,
+    }).then(note => {
+      note.container.enabled = true
+      note.container.layout = 'list'
+      appStore.updateNote(note)
+    })
+  } else {
+    appStore.createNote({ x: 0, y: 0 }, props.note.id)
+  }
 }
 </script>
 
@@ -86,6 +109,25 @@ function onDoubleClick(e: MouseEvent) {
   padding: 4px;
 }
 
+/* Columns layout */
+.note-container-section.columns-layout {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.note-container-list.columns-row {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 3px;
+  min-height: 120px;
+  padding: 4px;
+}
+
+.columns-row > .note-outer {
+  flex: 1 1 0;
+  min-width: 140px;
+}
+
 .container-empty {
   padding: 12px;
   text-align: center;
@@ -101,5 +143,16 @@ function onDoubleClick(e: MouseEvent) {
   margin: -1px 4px;
   opacity: 0.8;
   pointer-events: none;
+}
+
+.container-column-drop-indicator {
+  width: 3px;
+  min-height: 40px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: 4px -1px;
+  opacity: 0.8;
+  pointer-events: none;
+  flex-shrink: 0;
 }
 </style>
