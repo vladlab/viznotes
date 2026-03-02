@@ -708,17 +708,31 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
       if (fps) lines.push(`FPS: ${fps}`)
     }
 
-    // Audio track list
-    if (audioStreams.length > 0) {
-      lines.push('')
-      lines.push(`Audio tracks (${audioStreams.length}):`)
-      for (let i = 0; i < audioStreams.length; i++) {
-        const a = audioStreams[i]
-        const layout = describeAudioLayout(a)
-        const lang = a.tags?.language && a.tags.language !== 'und' ? ` [${a.tags.language}]` : ''
-        const title = a.tags?.title ? ` — ${a.tags.title}` : ''
-        lines.push(`  ${i + 1}. ${a.codec_name} ${layout}${lang}${title}`)
+    // Color info
+    if (videoStream) {
+      const cs = videoStream.color_space
+      const ct = videoStream.color_transfer
+      const cp = videoStream.color_primaries
+      const cr = videoStream.color_range
+
+      if (cs && cs !== 'unknown') lines.push(`Colorspace: ${cs}`)
+      if (ct && ct !== 'unknown') {
+        const eotfNames: Record<string, string> = {
+          'smpte2084': 'PQ (HDR10)',
+          'arib-std-b67': 'HLG',
+          'bt709': 'BT.709 (SDR)',
+          'iec61966-2-1': 'sRGB',
+          'linear': 'Linear',
+          'smpte240m': 'SMPTE 240M',
+          'bt2020-10': 'BT.2020 10-bit',
+          'bt2020-12': 'BT.2020 12-bit',
+          'gamma22': 'Gamma 2.2',
+          'gamma28': 'Gamma 2.8',
+        }
+        lines.push(`EOTF: ${eotfNames[ct] || ct}`)
       }
+      if (cp && cp !== 'unknown') lines.push(`Primaries: ${cp}`)
+      if (cr && cr !== 'unknown') lines.push(`Range: ${cr === 'tv' ? 'Limited' : cr === 'pc' ? 'Full' : cr}`)
     }
 
     // Data/metadata tracks
@@ -730,6 +744,19 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
         const name = d.tags?.handler_name || d.codec_tag_string || d.codec_name || 'unknown'
         const tc = d.tags?.timecode ? ` (TC: ${d.tags.timecode})` : ''
         lines.push(`  ${i + 1}. ${name}${tc}`)
+      }
+    }
+
+    // Audio track list
+    if (audioStreams.length > 0) {
+      lines.push('')
+      lines.push(`Audio tracks (${audioStreams.length}):`)
+      for (let i = 0; i < audioStreams.length; i++) {
+        const a = audioStreams[i]
+        const layout = describeAudioLayout(a)
+        const lang = a.tags?.language && a.tags.language !== 'und' ? ` [${a.tags.language}]` : ''
+        const title = a.tags?.title ? ` — ${a.tags.title}` : ''
+        lines.push(`  ${i + 1}. ${a.codec_name} ${layout}${lang}${title}`)
       }
     }
 
@@ -765,7 +792,21 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
       const filePath = props.note.link!
       const storage = getStorage()
       const vaultPath = storage.getVaultPath()
-      const waveformColors = ['#0b7285', '#6bba6b', '#e89840', '#9b6bca', '#e05555', '#42a5f5', '#d4c84a']
+      const waveformColor = '#0b7285'
+      const total = audioStreams.length
+
+      // Insert progress status paragraph
+      const current0 = appStore.notes.get(noteId)
+      if (current0) {
+        const blocks = current0.body.content?.content || []
+        blocks.push({
+          type: 'paragraph',
+          attrs: {},
+          content: [{ type: 'text', text: `⏳ Generating waveforms (0/${total})…` }],
+        })
+        current0.body.content = { type: 'doc', content: [...blocks] }
+        appStore.updateNote(current0)
+      }
 
       // Fire and forget — each waveform appends itself when done
       ;(async () => {
@@ -778,7 +819,6 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
           const lang = a.tags?.language && a.tags.language !== 'und' ? ` [${a.tags.language}]` : ''
           const title = a.tags?.title ? ` — ${a.tags.title}` : ''
           const label = `${i + 1}. ${a.codec_name} ${layout}${lang}${title}`
-          const color = waveformColors[i % waveformColors.length]
           const filename = `waveform_${nanoid(8)}.png`
 
           const channels = parseInt(a.channels || '2', 10)
@@ -792,13 +832,30 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
               filename,
               width: 600,
               height,
-              color,
+              color: waveformColor,
             })
 
-            // Append waveform to note body
+            // Update progress and append waveform
             const current = appStore.notes.get(noteId)
             if (!current) break
             const blocks = current.body.content?.content || []
+
+            // Find and update the progress paragraph
+            const progressIdx = blocks.findIndex((b: any) =>
+              b.content?.[0]?.text?.startsWith('⏳ Generating waveforms')
+            )
+            if (progressIdx >= 0) {
+              if (i < total - 1) {
+                blocks[progressIdx] = {
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: `⏳ Generating waveforms (${i + 1}/${total})…` }],
+                }
+              } else {
+                // Last one — remove progress line
+                blocks.splice(progressIdx, 1)
+              }
+            }
+
             blocks.push({
               type: 'paragraph',
               content: [{ type: 'text', text: `🔊 ${label}`, marks: [{ type: 'bold' }] }],
@@ -811,6 +868,20 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
             appStore.updateNote(current)
           } catch (e) {
             console.warn(`[waveform] Failed for track ${i}:`, e)
+          }
+        }
+
+        // Clean up progress line if still present (e.g. all failed)
+        const final_ = appStore.notes.get(noteId)
+        if (final_) {
+          const blocks = final_.body.content?.content || []
+          const idx = blocks.findIndex((b: any) =>
+            b.content?.[0]?.text?.startsWith('⏳ Generating waveforms')
+          )
+          if (idx >= 0) {
+            blocks.splice(idx, 1)
+            final_.body.content = { type: 'doc', content: [...blocks] }
+            appStore.updateNote(final_)
           }
         }
       })()
