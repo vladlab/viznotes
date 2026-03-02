@@ -94,6 +94,7 @@
         <NoteTextSection :note="note" sectionName="body" />
         <div v-if="note.body.enabled && note.container.enabled" class="note-divider" />
         <NoteContainer :note="note" :depth="depth" />
+        <NoteLinks :note="note" />
       </template>
     </div>
 
@@ -193,6 +194,7 @@
           </button>
         </template>
         <div class="context-separator" />
+        <button @click="startLinkFromHere">Create link…</button>
         <button v-if="!note.link" @click="convertToPage">Convert to page</button>
         <div class="context-separator" />
         <button class="danger" @click="onDelete">Delete note</button>
@@ -209,6 +211,7 @@ import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import NoteTextSection from './NoteTextSection.vue'
 import NoteContainer from './NoteContainer.vue'
+import NoteLinks from './NoteLinks.vue'
 import type { ResizeHandle } from '../composables/useResize'
 
 const props = withDefaults(defineProps<{
@@ -290,6 +293,12 @@ function onPointerDown(e: PointerEvent) {
 
   if (e.button !== 0) return
   e.stopPropagation()
+
+  // Linking mode: clicking a note completes the link
+  if (appStore.linkingSourceId.value) {
+    appStore.completeLinking(props.note.id)
+    return
+  }
 
   // If this note is being edited, let Tiptap handle events (text selection etc.)
   if (isEditing.value) return
@@ -591,6 +600,11 @@ async function followLink() {
       appStore.pushNotePropertyAction(props.note.id, before, 'Remove dead link')
     }
   }
+}
+
+function startLinkFromHere() {
+  closeContextMenu()
+  appStore.startLinking(props.note.id)
 }
 
 function onDelete() {

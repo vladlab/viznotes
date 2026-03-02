@@ -1,6 +1,7 @@
 import { ref, computed, toRaw } from 'vue'
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
+import type { Link } from '../types/link'
 
 function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(toRaw(obj)))
@@ -11,6 +12,7 @@ function deepClone<T>(obj: T): T {
 /** Note snapshots can be full Notes (create/delete) or property-level diffs (mutations) */
 interface NoteSnapshot { [noteId: string]: Partial<Note> | null }
 interface ArrowSnapshot { [arrowId: string]: Arrow | null }
+interface LinkSnapshot { [linkId: string]: Link | null }
 
 interface UndoAction {
   description: string
@@ -18,6 +20,8 @@ interface UndoAction {
   notesAfter: NoteSnapshot
   arrowsBefore: ArrowSnapshot
   arrowsAfter: ArrowSnapshot
+  linksBefore: LinkSnapshot
+  linksAfter: LinkSnapshot
   rootIdsBefore: string[] | null
   rootIdsAfter: string[] | null
   selectionBefore: string[]
@@ -26,11 +30,13 @@ interface UndoAction {
   arrowSelectionAfter: string[]
 }
 
-type UndoActionInput = Omit<UndoAction, 'arrowsBefore' | 'arrowsAfter' | 'arrowSelectionBefore' | 'arrowSelectionAfter'> & {
+type UndoActionInput = Omit<UndoAction, 'arrowsBefore' | 'arrowsAfter' | 'arrowSelectionBefore' | 'arrowSelectionAfter' | 'linksBefore' | 'linksAfter'> & {
   arrowsBefore?: ArrowSnapshot
   arrowsAfter?: ArrowSnapshot
   arrowSelectionBefore?: string[]
   arrowSelectionAfter?: string[]
+  linksBefore?: LinkSnapshot
+  linksAfter?: LinkSnapshot
 }
 
 // ── Stack ──
@@ -57,6 +63,8 @@ function pushAction(input: UndoActionInput) {
     arrowsAfter: input.arrowsAfter ?? {},
     arrowSelectionBefore: input.arrowSelectionBefore ?? [],
     arrowSelectionAfter: input.arrowSelectionAfter ?? [],
+    linksBefore: input.linksBefore ?? {},
+    linksAfter: input.linksAfter ?? {},
   }
   undoStack.value.push(action)
   if (undoStack.value.length > MAX_HISTORY) undoStack.value.shift()

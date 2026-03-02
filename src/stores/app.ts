@@ -14,6 +14,9 @@ import {
   currentPage,
   notes,
   arrows,
+  links,
+  linkingSourceId,
+  focusNoteId,
   pageList,
   pageHistory,
   loading,
@@ -85,6 +88,18 @@ import {
 // ── Generators ──
 import { generateWeek } from './generators'
 
+// ── Links ──
+import {
+  getLinksForNote,
+  linkedNoteId,
+  linkExists,
+  createLink,
+  deleteLink,
+  startLinking,
+  cancelLinking,
+  completeLinking,
+} from './links'
+
 // ── Pages ──
 import {
   loadPageList,
@@ -105,6 +120,7 @@ import {
 history.setApplySnapshot(async (action, direction) => {
   const noteSnaps = direction === 'undo' ? action.notesBefore : action.notesAfter
   const arrowSnaps = direction === 'undo' ? action.arrowsBefore : action.arrowsAfter
+  const linkSnaps = direction === 'undo' ? action.linksBefore : action.linksAfter
   const rootIds = direction === 'undo' ? action.rootIdsBefore : action.rootIdsAfter
   const selection = direction === 'undo' ? action.selectionBefore : action.selectionAfter
   const arrowSel = direction === 'undo' ? action.arrowSelectionBefore : action.arrowSelectionAfter
@@ -164,6 +180,30 @@ history.setApplySnapshot(async (action, direction) => {
       selectedArrowIds.delete(id)
     }
     await storage.deleteArrows(orphanedIds)
+  }
+
+  // Apply link snapshots
+  for (const [id, snapshot] of Object.entries(linkSnaps)) {
+    if (snapshot === null) {
+      links.delete(id)
+      await storage.deleteLink(id)
+    } else {
+      const restored = deepClone(snapshot)
+      links.set(id, restored)
+      await storage.saveLink(restored)
+    }
+  }
+
+  // Clean up orphaned links
+  const orphanedLinkIds: string[] = []
+  for (const [id, link] of links) {
+    if (!notes.has(link.noteIdA) || !notes.has(link.noteIdB)) {
+      orphanedLinkIds.push(id)
+    }
+  }
+  if (orphanedLinkIds.length > 0) {
+    for (const id of orphanedLinkIds) links.delete(id)
+    await storage.deleteLinks(orphanedLinkIds)
   }
 
   // Apply root IDs
@@ -275,6 +315,19 @@ export const appStore = {
 
   // Generators
   generateWeek,
+
+  // Links
+  links,
+  linkingSourceId,
+  focusNoteId,
+  getLinksForNote,
+  linkedNoteId,
+  linkExists,
+  createLink,
+  deleteLink,
+  startLinking,
+  cancelLinking,
+  completeLinking,
 
   // History
   undo: history.undo,

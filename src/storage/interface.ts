@@ -1,5 +1,6 @@
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
+import type { Link } from '../types/link'
 import type { Page, PageSummary } from '../types/page'
 
 export interface StorageBackend {
@@ -26,7 +27,13 @@ export interface StorageBackend {
   deleteArrows(ids: string[]): Promise<void>
   getArrowsForPage(pageId: string): Promise<Arrow[]>
 
+  // Links
+  saveLink(link: Link): Promise<Link>
+  deleteLink(id: string): Promise<void>
+  deleteLinks(ids: string[]): Promise<void>
+  getLinksForPage(pageId: string): Promise<Link[]>
+
   // Bulk
-  exportAll(): Promise<{ pages: Page[]; notes: Note[]; arrows: Arrow[] }>
-  importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[] }): Promise<void>
+  exportAll(): Promise<{ pages: Page[]; notes: Note[]; arrows: Arrow[]; links: Link[] }>
+  importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: Link[] }): Promise<void>
 }

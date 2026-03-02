@@ -824,7 +824,7 @@ function findNoteAtPoint(clientX: number, clientY: number, excludeId: string): s
   height: 100%;
   transform-origin: 0 0;
   pointer-events: none;
-  z-index: 2;
+  z-index: 0;
   overflow: visible;
 }
 

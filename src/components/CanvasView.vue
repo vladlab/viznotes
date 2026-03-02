@@ -2,7 +2,7 @@
   <div
     ref="containerRef"
     class="canvas-container"
-    :class="{ 'is-panning': canvas.isPanning.value || spaceHeld }"
+    :class="{ 'is-panning': canvas.isPanning.value || spaceHeld, 'is-linking': appStore.linkingSourceId.value }"
     tabindex="0"
     @wheel.prevent="canvas.handleWheel"
     @pointerdown="onCanvasPointerDown"
@@ -127,6 +127,12 @@
       :transformCSS="canvas.transformCSS.value"
     />
 
+
+    <!-- Linking mode banner -->
+    <div v-if="appStore.linkingSourceId.value" class="linking-mode-banner">
+      <span>Click a note to link</span>
+      <button @click="appStore.cancelLinking()">Cancel</button>
+    </div>
 
     <!-- File drop zone overlay -->
     <div v-if="fileDropActive" class="file-drop-overlay">
@@ -426,6 +432,12 @@ function onCanvasPointerDown(e: PointerEvent) {
   if (isCanvasBackground(target)) {
     appStore.clearEditing()
 
+    // Cancel linking mode on background click
+    if (appStore.linkingSourceId.value) {
+      appStore.cancelLinking()
+      return
+    }
+
     // Space+left-click = pan
     if (spaceHeld.value) {
       canvas.isPanning.value = true
@@ -594,6 +606,13 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Cancel linking mode
+  if (e.key === 'Escape' && appStore.linkingSourceId.value) {
+    e.preventDefault()
+    appStore.cancelLinking()
+    return
+  }
+
   // Don't handle other keys when editing
   if (appStore.editingNoteId.value) {
     if (e.key === 'Escape') {
@@ -631,6 +650,20 @@ function onKeyDown(e: KeyboardEvent) {
             appStore.selectedNoteIds.add(id)
           }
         }
+      }
+      break
+
+    case 'z':
+      if (!isCtrl) {
+        e.preventDefault()
+        centerOnSelection()
+      }
+      break
+
+    case 'Z':
+      if (!isCtrl) {
+        e.preventDefault()
+        fitAllNotes()
       }
       break
   }
@@ -816,6 +849,32 @@ watch(() => appStore.currentPageId.value, (_newId, oldId) => {
   })
 })
 
+// Pan to a note when focusNoteId is set (e.g. clicking a link chip)
+watch(() => appStore.focusNoteId.value, (noteId) => {
+  if (!noteId) return
+  appStore.focusNoteId.value = null
+
+  nextTick(() => {
+    const el = document.getElementById(`note-${noteId}`) as HTMLElement | null
+    if (!el) return
+
+    // Get the element's actual screen-space center (works for nested notes too)
+    const rect = el.getBoundingClientRect()
+    const screenCx = rect.left + rect.width / 2
+    const screenCy = rect.top + rect.height / 2
+
+    // Convert to world coordinates
+    const world = canvas.clientToWorld(screenCx, screenCy)
+
+    const vw = containerWidth.value
+    const vh = containerHeight.value
+
+    // Keep current scale, just pan to center the note
+    canvas.transform.x = vw / 2 - world.x * canvas.transform.scale
+    canvas.transform.y = vh / 2 - world.y * canvas.transform.scale
+  })
+})
+
 onMounted(async () => {
   containerRef.value?.focus()
 
@@ -887,6 +946,49 @@ onUnmounted(() => {
 
 .canvas-container.is-panning {
   cursor: grabbing;
+}
+
+.canvas-container.is-linking {
+  cursor: pointer;
+}
+
+.canvas-container.is-linking .note-outer {
+  cursor: pointer;
+}
+
+.linking-mode-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--controls-bg));
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: var(--shadow-dialog);
+  font-size: 0.82em;
+  color: var(--text-secondary);
+  user-select: none;
+  pointer-events: auto;
+}
+
+.linking-mode-banner button {
+  background: none;
+  border: 1px solid var(--border-main);
+  color: var(--text-muted);
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.linking-mode-banner button:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
 }
 
 .canvas-grid {

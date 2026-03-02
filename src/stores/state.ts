@@ -7,6 +7,7 @@
 import { reactive, ref, computed, toRaw, nextTick } from 'vue'
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
+import type { Link } from '../types/link'
 import type { Page, PageSummary } from '../types/page'
 import type { StorageBackend } from '../storage/interface'
 
@@ -34,9 +35,16 @@ export const currentPageId = ref<string | null>(null)
 export const currentPage = ref<Page | null>(null)
 export const notes = reactive<Map<string, Note>>(new Map())
 export const arrows = reactive<Map<string, Arrow>>(new Map())
+export const links = reactive<Map<string, Link>>(new Map())
 export const pageList = ref<PageSummary[]>([])
 export const pageHistory = ref<string[]>([])
 export const loading = ref(false)
+
+// Linking mode: when non-null, clicking a note creates a link from this source
+export const linkingSourceId = ref<string | null>(null)
+
+// Set to a note ID to pan the canvas to focus on it, then auto-clears
+export const focusNoteId = ref<string | null>(null)
 
 // Bumped on every drag frame to force arrow recomputation
 export const dragTick = ref(0)

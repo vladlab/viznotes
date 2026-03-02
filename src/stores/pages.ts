@@ -12,6 +12,7 @@ import { history } from './history'
 import {
   notes,
   arrows,
+  links,
   currentPageId,
   currentPage,
   pageList,
@@ -50,13 +51,18 @@ export async function loadPage(pageId: string) {
 
     const pageNotes = await storage.getNotesForPage(pageId)
     const pageArrows = await storage.getArrowsForPage(pageId)
+    const pageLinks = await storage.getLinksForPage(pageId)
     notes.clear()
     arrows.clear()
+    links.clear()
     for (const note of pageNotes) {
       notes.set(note.id, note)
     }
     for (const arrow of pageArrows) {
       arrows.set(arrow.id, arrow)
+    }
+    for (const link of pageLinks) {
+      links.set(link.id, link)
     }
 
     currentPage.value = page
@@ -133,6 +139,7 @@ export async function deletePage(pageId: string) {
       currentPageId.value = null
       notes.clear()
       arrows.clear()
+      links.clear()
       history.clear()
     }
   }
@@ -156,7 +163,7 @@ export async function exportData() {
   return storage.exportAll()
 }
 
-export async function importData(data: { pages: Page[]; notes: Note[]; arrows: Arrow[] }) {
+export async function importData(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: any[] }) {
   const storage = getStorage()
   await storage.importAll(data)
   await loadPageList()

@@ -5,12 +5,15 @@
 
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
+import type { Link } from '../types/link'
 import { createDefaultNote } from '../types/note'
 import { history } from './history'
 import { deleteSelectedArrows } from './arrows'
+import { deleteLinksForNote, getLinksForNote } from './links'
 import {
   notes,
   arrows,
+  links,
   currentPage,
   selectedNoteIds,
   selectedArrowIds,
@@ -253,6 +256,18 @@ export async function deleteNote(noteId: string, parentNoteId?: string) {
     }
   }
 
+  // Collect links connected to any deleted note
+  const linksToDelete: string[] = []
+  const linksBefore: Record<string, Link | null> = {}
+  const linksAfterMap: Record<string, Link | null> = {}
+  for (const link of links.values()) {
+    if (allIds.includes(link.noteIdA) || allIds.includes(link.noteIdB)) {
+      linksToDelete.push(link.id)
+      linksBefore[link.id] = deepClone(link)
+      linksAfterMap[link.id] = null
+    }
+  }
+
   // Snapshot parent
   if (parentNoteId) {
     notesBefore[parentNoteId] = history.snapshotNote(notes, parentNoteId)
@@ -289,6 +304,14 @@ export async function deleteNote(noteId: string, parentNoteId?: string) {
     await storage.deleteArrows(arrowsToDelete)
   }
 
+  // Delete connected links
+  for (const lid of linksToDelete) {
+    links.delete(lid)
+  }
+  if (linksToDelete.length > 0) {
+    await storage.deleteLinks(linksToDelete)
+  }
+
   // Snapshot parent after
   if (parentNoteId) {
     notesAfter[parentNoteId] = history.snapshotNote(notes, parentNoteId)
@@ -302,6 +325,8 @@ export async function deleteNote(noteId: string, parentNoteId?: string) {
     notesAfter: optimized.notesAfter,
     arrowsBefore,
     arrowsAfter: arrowsAfterMap,
+    linksBefore,
+    linksAfter: linksAfterMap,
     rootIdsBefore: parentNoteId ? null : rootIdsBefore,
     rootIdsAfter: parentNoteId ? null : getRootIds(),
     selectionBefore: selBefore,
@@ -377,6 +402,18 @@ export async function deleteSelected() {
     }
   }
 
+  // Collect links connected to deleted notes
+  const linksToDeleteSel: string[] = []
+  const linksBeforeSel: Record<string, Link | null> = {}
+  const linksAfterSel: Record<string, Link | null> = {}
+  for (const link of links.values()) {
+    if (deleteIdSet.has(link.noteIdA) || deleteIdSet.has(link.noteIdB)) {
+      linksToDeleteSel.push(link.id)
+      linksBeforeSel[link.id] = deepClone(link)
+      linksAfterSel[link.id] = null
+    }
+  }
+
   // Perform deletions
   editingNoteId.value = null
   setEditStartSnapshot(null)
@@ -411,6 +448,10 @@ export async function deleteSelected() {
   }
   if (arrowsToDelete.length > 0) await storage.deleteArrows(arrowsToDelete)
 
+  // Delete connected links
+  for (const lid of linksToDeleteSel) links.delete(lid)
+  if (linksToDeleteSel.length > 0) await storage.deleteLinks(linksToDeleteSel)
+
   await persistPage()
 
   // Snapshot parents after
@@ -426,6 +467,8 @@ export async function deleteSelected() {
     notesAfter: optimized.notesAfter,
     arrowsBefore: arrowsBefore,
     arrowsAfter: arrowsAfterMap,
+    linksBefore: linksBeforeSel,
+    linksAfter: linksAfterSel,
     rootIdsBefore,
     rootIdsAfter: getRootIds(),
     selectionBefore: selBefore,
