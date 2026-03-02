@@ -189,7 +189,8 @@ export function bringToTop(note: Note) {
 
 export const parentMap = new Map<string, string>()
 
-/** Rebuild the entire parent map from the current notes collection */
+/** Rebuild the entire parent map from the current notes collection.
+ *  Also detects and breaks cycles in childIds to prevent infinite rendering. */
 export function rebuildParentMap() {
   parentMap.clear()
   for (const [id, note] of notes) {
@@ -197,6 +198,27 @@ export function rebuildParentMap() {
       for (const childId of note.container.childIds) {
         parentMap.set(childId, id)
       }
+    }
+  }
+
+  // Detect and break cycles: walk up from each note, if we revisit → cycle
+  for (const [id] of notes) {
+    const visited = new Set<string>()
+    let cur = id
+    while (parentMap.has(cur)) {
+      if (visited.has(cur)) {
+        // Cycle detected: break it by removing this child from its parent's childIds
+        const badParentId = parentMap.get(cur)!
+        const badParent = notes.get(badParentId)
+        if (badParent) {
+          badParent.container.childIds = badParent.container.childIds.filter(c => c !== cur)
+          console.warn(`[rebuildParentMap] Broke cycle: removed ${cur} from ${badParentId}.childIds`)
+        }
+        parentMap.delete(cur)
+        break
+      }
+      visited.add(cur)
+      cur = parentMap.get(cur)!
     }
   }
 }

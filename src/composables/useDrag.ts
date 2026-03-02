@@ -296,12 +296,14 @@ export function useDrag(
     return false
   }
 
-  function isDescendant(ancestorId: string, potentialDescendantId: string): boolean {
+  function isDescendant(ancestorId: string, potentialDescendantId: string, visited = new Set<string>()): boolean {
+    if (visited.has(ancestorId)) return false  // Cycle protection
+    visited.add(ancestorId)
     const ancestor = appStore.notes.get(ancestorId)
     if (!ancestor?.container.enabled) return false
     for (const childId of ancestor.container.childIds) {
       if (childId === potentialDescendantId) return true
-      if (isDescendant(childId, potentialDescendantId)) return true
+      if (isDescendant(childId, potentialDescendantId, visited)) return true
     }
     return false
   }

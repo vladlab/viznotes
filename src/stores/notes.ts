@@ -328,8 +328,11 @@ export async function deleteSelected() {
   // broken parent lookups, and corrupt undo snapshots.
   const selectedSet = new Set(ids)
   const topLevelIds = ids.filter(id => {
+    const visited = new Set<string>()
     let cur = findParent(id)
     while (cur) {
+      if (visited.has(cur)) break  // Cycle protection
+      visited.add(cur)
       if (selectedSet.has(cur)) return false
       cur = findParent(cur)
     }
@@ -448,8 +451,13 @@ export async function deleteAllSelected() {
 
 export async function reparentNote(noteId: string, oldParentNoteId: string | undefined, newParentNoteId: string) {
   if (!currentPage.value) return
+  if (noteId === newParentNoteId) return  // Can't parent into self
   const note = notes.get(noteId)
   if (!note) return
+
+  // Prevent reparenting into own descendants (would create cycle)
+  const descendants = new Set(history.collectDescendantIds(notes, noteId))
+  if (descendants.has(newParentNoteId)) return
 
   const selBefore = selectionArray()
   const rootIdsBefore = getRootIds()

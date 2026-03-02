@@ -106,12 +106,14 @@ function snapshotArrows(arrows: Map<string, Arrow>, ids: string[]): ArrowSnapsho
   return snapshot
 }
 
-function collectDescendantIds(notes: Map<string, Note>, rootId: string): string[] {
+function collectDescendantIds(notes: Map<string, Note>, rootId: string, visited = new Set<string>()): string[] {
+  if (visited.has(rootId)) return []  // Cycle protection
+  visited.add(rootId)
   const result: string[] = [rootId]
   const note = notes.get(rootId)
   if (note?.container.enabled) {
     for (const childId of note.container.childIds) {
-      result.push(...collectDescendantIds(notes, childId))
+      result.push(...collectDescendantIds(notes, childId, visited))
     }
   }
   return result

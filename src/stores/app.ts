@@ -74,6 +74,14 @@ import {
   deleteSelectedArrows,
 } from './arrows'
 
+// ── Clipboard ──
+import {
+  copySelected,
+  hasClipboard,
+  pasteNotes,
+  duplicateNotes,
+} from './clipboard'
+
 // ── Pages ──
 import {
   loadPageList,
@@ -251,6 +259,12 @@ export const appStore = {
   updateArrow,
   deleteArrow,
   deleteSelectedArrows,
+
+  // Clipboard
+  copySelected,
+  hasClipboard,
+  pasteNotes,
+  duplicateNotes,
 
   // Data
   exportData,

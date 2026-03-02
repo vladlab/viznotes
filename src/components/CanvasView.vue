@@ -481,6 +481,38 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Copy
+  if (isCtrl && e.key === 'c' && !appStore.editingNoteId.value) {
+    e.preventDefault()
+    appStore.copySelected()
+    return
+  }
+
+  // Paste
+  if (isCtrl && e.key === 'v' && !appStore.editingNoteId.value) {
+    e.preventDefault()
+    if (appStore.hasClipboard() && appStore.currentPage.value) {
+      // Paste at center of current viewport
+      const vw = containerWidth.value
+      const vh = containerHeight.value
+      const centerWorld = {
+        x: (-canvas.transform.x + vw / 2) / canvas.transform.scale,
+        y: (-canvas.transform.y + vh / 2) / canvas.transform.scale,
+      }
+      appStore.pasteNotes(appStore.currentPage.value.id, centerWorld).catch(console.error)
+    }
+    return
+  }
+
+  // Duplicate
+  if (isCtrl && e.key === 'd' && !appStore.editingNoteId.value) {
+    e.preventDefault()
+    if (appStore.selectedNoteIds.size > 0) {
+      appStore.duplicateNotes(Array.from(appStore.selectedNoteIds)).catch(console.error)
+    }
+    return
+  }
+
   // Don't handle other keys when editing
   if (appStore.editingNoteId.value) {
     if (e.key === 'Escape') {
