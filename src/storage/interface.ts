@@ -36,4 +36,7 @@ export interface StorageBackend {
   // Bulk
   exportAll(): Promise<{ pages: Page[]; notes: Note[]; arrows: Arrow[]; links: Link[] }>
   importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: Link[] }): Promise<void>
+
+  // Vault
+  getVaultPath(): string
 }

@@ -189,8 +189,11 @@
         <button v-if="note.link" @click="removeLink" class="danger">Remove link</button>
         <template v-if="isFileLink">
           <div class="context-separator" />
-          <button @click="analyzeFile" :disabled="analyzing">
-            {{ analyzing ? 'Analyzing…' : '🔍 Analyze media' }}
+          <button @click="analyzeFile('quick')" :disabled="analyzing">
+            {{ analyzing ? 'Analyzing…' : '🔍 Quick analyze' }}
+          </button>
+          <button @click="analyzeFile('full')" :disabled="analyzing">
+            {{ analyzing ? 'Analyzing…' : '🔬 Full analyze' }}
           </button>
         </template>
         <div class="context-separator" />
@@ -209,6 +212,8 @@ import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/plat
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
+import { getStorage } from '../stores/state'
+import { nanoid } from 'nanoid'
 import NoteTextSection from './NoteTextSection.vue'
 import NoteContainer from './NoteContainer.vue'
 import NoteLinks from './NoteLinks.vue'
@@ -614,7 +619,7 @@ function onDelete() {
 
 const analyzing = ref(false)
 
-async function analyzeFile() {
+async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
   if (!isFileLink.value || analyzing.value) return
   analyzing.value = true
   closeContextMenu()
@@ -655,6 +660,17 @@ async function analyzeFile() {
     const format = probe.format || {}
 
     const lines: string[] = []
+
+    // Duration
+    const duration = parseFloat(format.duration || '0')
+    if (duration > 0) {
+      const h = Math.floor(duration / 3600)
+      const m = Math.floor((duration % 3600) / 60)
+      const s = Math.floor(duration % 60)
+      const f = Math.round((duration % 1) * 100)
+      const parts = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
+      lines.push(`Duration: ${parts}.${String(f).padStart(2, '0')}`)
+    }
 
     // File size
     const bytes = parseInt(format.size || '0', 10)
@@ -721,6 +737,7 @@ async function analyzeFile() {
       lines.push('No media streams found')
     }
 
+    // Show text analysis immediately
     const before = history.snapshotNote(appStore.notes, props.note.id)!
 
     props.note.body.enabled = true
@@ -728,7 +745,7 @@ async function analyzeFile() {
 
     // Append to existing body content
     const existingBlocks = props.note.body.content?.content || []
-    const newBlocks = lines.map(line => ({
+    const newBlocks: any[] = lines.map(line => ({
       type: 'paragraph',
       content: line ? [{ type: 'text', text: line }] : [],
     }))
@@ -740,6 +757,65 @@ async function analyzeFile() {
 
     appStore.updateNote(props.note)
     appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
+    analyzing.value = false
+
+    // Generate waveform images in background (full analyze only)
+    if (mode === 'full' && audioStreams.length > 0) {
+      const noteId = props.note.id
+      const filePath = props.note.link!
+      const storage = getStorage()
+      const vaultPath = storage.getVaultPath()
+      const waveformColors = ['#0b7285', '#6bba6b', '#e89840', '#9b6bca', '#e05555', '#42a5f5', '#d4c84a']
+
+      // Fire and forget — each waveform appends itself when done
+      ;(async () => {
+        for (let i = 0; i < audioStreams.length; i++) {
+          const note = appStore.notes.get(noteId)
+          if (!note) break // note was deleted
+
+          const a = audioStreams[i]
+          const layout = describeAudioLayout(a)
+          const lang = a.tags?.language && a.tags.language !== 'und' ? ` [${a.tags.language}]` : ''
+          const title = a.tags?.title ? ` — ${a.tags.title}` : ''
+          const label = `${i + 1}. ${a.codec_name} ${layout}${lang}${title}`
+          const color = waveformColors[i % waveformColors.length]
+          const filename = `waveform_${nanoid(8)}.png`
+
+          const channels = parseInt(a.channels || '2', 10)
+          const height = Math.max(60, channels * 30)
+
+          try {
+            await invoke('generate_waveform', {
+              vaultPath,
+              filePath,
+              trackIndex: i,
+              filename,
+              width: 600,
+              height,
+              color,
+            })
+
+            // Append waveform to note body
+            const current = appStore.notes.get(noteId)
+            if (!current) break
+            const blocks = current.body.content?.content || []
+            blocks.push({
+              type: 'paragraph',
+              content: [{ type: 'text', text: `🔊 ${label}`, marks: [{ type: 'bold' }] }],
+            })
+            blocks.push({
+              type: 'image',
+              attrs: { src: filename },
+            })
+            current.body.content = { type: 'doc', content: [...blocks] }
+            appStore.updateNote(current)
+          } catch (e) {
+            console.warn(`[waveform] Failed for track ${i}:`, e)
+          }
+        }
+      })()
+    }
+    return // skip the finally block's analyzing=false since we already set it
   } catch (e: any) {
     console.error('ffprobe failed:', e)
     // Show error in the note body

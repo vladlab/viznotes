@@ -28,6 +28,9 @@ import TextAlign from '@tiptap/extension-text-align'
 import Underline from '@tiptap/extension-underline'
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
 import { Markdown } from 'tiptap-markdown'
+import { TiptapImage } from '../extensions/TiptapImage'
+import { saveImageAsset } from '../utils/assets'
+import { getStorage } from '../stores/state'
 import type { Note, NoteTextSection } from '../types/note'
 import { appStore } from '../stores/app'
 import { activeEditor } from '../stores/editor'
@@ -67,6 +70,7 @@ const editor = useEditor({
       transformPastedText: true,
       transformCopiedText: false,
     }),
+    TiptapImage,
   ],
   editorProps: {
     attributes: {
@@ -78,6 +82,9 @@ const editor = useEditor({
     props.note[props.sectionName].content = editor.getJSON()
     appStore.markNoteDirty(props.note, 500)
     suppressContentWatch = false
+
+    // Check for blob:/data: images that need saving to assets
+    fixUnsavedImages()
   },
 })
 
@@ -125,6 +132,100 @@ const sectionStyle = computed(() => {
   }
   return {}
 })
+
+/**
+ * DOM-level paste interceptor for images.
+ * Uses a capturing listener so it fires BEFORE Tiptap/ProseMirror/Markdown.
+ * This guarantees we save images to assets regardless of what Tiptap does.
+ */
+/**
+ * Scan editor for image nodes with blob: or data: URLs.
+ * Fetch them, save to assets, and replace src with the filename.
+ * Called from onUpdate — debounced to avoid thrashing.
+ */
+let imageFixPending = false
+
+function fixUnsavedImages() {
+  if (imageFixPending || !editor.value) return
+
+  const editorEl = editor.value.view.dom as HTMLElement
+  const imgs = editorEl.querySelectorAll('img')
+  const unsaved: HTMLImageElement[] = []
+  for (const img of imgs) {
+    if (/^(blob:|data:image\/)/.test(img.src)) {
+      unsaved.push(img)
+    }
+  }
+
+  if (unsaved.length === 0) return
+
+  imageFixPending = true
+  ;(async () => {
+    try {
+      const storage = getStorage()
+      const vaultPath = storage.getVaultPath()
+      let changed = false
+
+      for (const img of unsaved) {
+        try {
+          let base64: string
+          let ext: string
+
+          if (img.src.startsWith('blob:')) {
+            // Fetch the blob and convert to base64
+            const resp = await fetch(img.src)
+            const blob = await resp.blob()
+            ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
+            const buf = await blob.arrayBuffer()
+            const bytes = new Uint8Array(buf)
+            let binary = ''
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+            base64 = btoa(binary)
+          } else {
+            // data: URL
+            const match = img.src.match(/^data:image\/(\w+);base64,(.+)$/)
+            if (!match) continue
+            ext = match[1].replace('jpeg', 'jpg')
+            base64 = match[2]
+          }
+
+          const filename = await saveImageAsset(vaultPath, base64, ext)
+
+          // Find and update the ProseMirror node
+          const { state } = editor.value!.view
+          let pos: number | null = null
+          state.doc.descendants((node, nodePos) => {
+            if (pos !== null) return false
+            if (node.type.name === 'image' && (node.attrs.src === img.getAttribute('src') || node.attrs.src?.startsWith('blob:') || node.attrs.src?.startsWith('data:image'))) {
+              pos = nodePos
+              return false
+            }
+          })
+
+          if (pos !== null) {
+            const tr = state.tr.setNodeMarkup(pos, undefined, {
+              ...state.doc.nodeAt(pos)!.attrs,
+              src: filename,
+            })
+            editor.value!.view.dispatch(tr)
+            changed = true
+          }
+        } catch (e) {
+          console.warn('[image-fix] Failed to save image:', e)
+        }
+      }
+
+      if (changed) {
+        suppressContentWatch = true
+        props.note[props.sectionName].content = editor.value!.getJSON()
+        appStore.markNoteDirty(props.note, 500)
+        suppressContentWatch = false
+      }
+    } finally {
+      imageFixPending = false
+    }
+  })()
+}
 
 onBeforeUnmount(() => {
   if (activeEditor.value === editor.value) {
@@ -325,5 +426,35 @@ onBeforeUnmount(() => {
 
 .note-editor .tiptap table .selectedCell {
   background: var(--accent-bg);
+}
+
+/* Inline images */
+.tiptap-image-wrapper {
+  display: block;
+  margin: 4px 0;
+  line-height: 0;
+}
+
+.tiptap-image-wrapper img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+}
+
+.is-editing .tiptap-image-wrapper.selected img {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.image-loading,
+.image-error {
+  padding: 12px;
+  text-align: center;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  background: var(--bg-surface-hover);
+  border-radius: 4px;
+  line-height: normal;
 }
 </style>

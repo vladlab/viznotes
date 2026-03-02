@@ -22,6 +22,15 @@
                 <button class="btn-small" @click="changeVault">Change…</button>
               </div>
             </div>
+            <div class="setting-row">
+              <label>Assets</label>
+              <div class="vault-path-row">
+                <span v-if="cleanupResult" class="cleanup-result">{{ cleanupResult }}</span>
+                <button class="btn-small" @click="cleanupOrphanedAssets" :disabled="cleaningUp">
+                  {{ cleaningUp ? 'Scanning…' : 'Clean up unused assets' }}
+                </button>
+              </div>
+            </div>
           </section>
 
           <!-- Appearance -->
@@ -137,6 +146,8 @@ const vaultPath = ref<string | null>(null)
 const systemFonts = ref<string[]>([])
 const fontsLoading = ref(false)
 const fontSearch = ref('')
+const cleaningUp = ref(false)
+const cleanupResult = ref<string | null>(null)
 
 const filteredFonts = computed(() => {
   const q = fontSearch.value.toLowerCase()
@@ -187,6 +198,25 @@ async function changeVault() {
   } catch (e) {
     console.error('Failed to change vault:', e)
   }
+}
+
+async function cleanupOrphanedAssets() {
+  if (!vaultPath.value || cleaningUp.value) return
+  cleaningUp.value = true
+  cleanupResult.value = null
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const moved = await invoke<number>('cleanup_orphaned_assets', { vaultPath: vaultPath.value })
+    if (moved === 0) {
+      cleanupResult.value = 'No orphaned assets found'
+    } else {
+      cleanupResult.value = `Moved ${moved} file${moved > 1 ? 's' : ''} to assets/orphans/`
+    }
+  } catch (e) {
+    console.error('Cleanup failed:', e)
+    cleanupResult.value = `Error: ${e}`
+  }
+  cleaningUp.value = false
 }
 </script>
 
@@ -298,6 +328,11 @@ async function changeVault() {
   white-space: nowrap;
   direction: rtl;
   text-align: left;
+}
+
+.cleanup-result {
+  font-size: 0.8em;
+  color: var(--text-muted);
 }
 
 .btn-small {

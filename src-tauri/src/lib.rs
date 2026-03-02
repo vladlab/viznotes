@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
+use base64::Engine;
 
 /// Get the config file path inside app config dir (~/.config/ on Linux)
 fn config_path(app: &tauri::AppHandle) -> PathBuf {
@@ -142,6 +143,47 @@ fn run_ffprobe(path: String, args: Vec<String>) -> Result<String, String> {    l
     }
 }
 
+/// Generate a waveform PNG for a specific audio track using ffmpeg's showwavespic filter.
+/// Returns the asset filename (e.g. "waveform_abc123.png").
+#[tauri::command]
+fn generate_waveform(
+    vault_path: String,
+    file_path: String,
+    track_index: usize,
+    filename: String,
+    width: u32,
+    height: u32,
+    color: String,
+) -> Result<String, String> {
+    let assets_dir = PathBuf::from(&vault_path).join("assets");
+    fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
+
+    let output_path = assets_dir.join(&filename);
+
+    let filter = format!(
+        "[0:a:{}]showwavespic=s={}x{}:colors={}:scale=sqrt:filter=peak:split_channels=1",
+        track_index, width, height, color
+    );
+
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-i", &file_path,
+            "-filter_complex", &filter,
+            "-frames:v", "1",
+            "-y",
+        ])
+        .arg(output_path.to_str().unwrap())
+        .output()
+        .map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
+
+    if output.status.success() {
+        Ok(filename)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("ffmpeg waveform error: {}", stderr))
+    }
+}
+
 #[tauri::command]
 fn show_in_folder(path: String) -> Result<(), String> {
     let p = Path::new(&path);
@@ -181,6 +223,91 @@ fn show_in_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn save_asset(vault_path: String, filename: String, base64_data: String) -> Result<String, String> {
+    let assets_dir = PathBuf::from(&vault_path).join("assets");
+    fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
+
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(&base64_data)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+
+    let full_path = assets_dir.join(&filename);
+    fs::write(&full_path, &data).map_err(|e| e.to_string())?;
+
+    Ok(full_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn read_asset(vault_path: String, filename: String) -> Result<String, String> {
+    let full_path = PathBuf::from(&vault_path).join("assets").join(&filename);
+    let data = fs::read(&full_path).map_err(|e| format!("Read error: {}", e))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&data))
+}
+
+/// Scan all page JSON files for referenced asset filenames,
+/// then move any files in assets/ that aren't referenced into assets/orphans/.
+#[tauri::command]
+fn cleanup_orphaned_assets(vault_path: String) -> Result<usize, String> {
+    let vault = PathBuf::from(&vault_path);
+    let assets_dir = vault.join("assets");
+
+    if !assets_dir.exists() {
+        return Ok(0);
+    }
+
+    // Collect all asset filenames referenced in any page file.
+    // We do a simple text search for filenames rather than full JSON parsing,
+    // so we catch references in any field.
+    let mut referenced = std::collections::HashSet::new();
+
+    // Read all .json files in vault/pages/ (page data files)
+    let pages_dir = vault.join("pages");
+    if let Ok(entries) = fs::read_dir(&pages_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    // Find all asset-like filenames (nanoid patterns)
+                    for cap in regex_lite::Regex::new(r#"[A-Za-z0-9_-]{8,20}\.\w{3,4}"#)
+                        .unwrap()
+                        .find_iter(&content)
+                    {
+                        referenced.insert(cap.as_str().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // List files in assets/ (not subdirectories)
+    let mut moved = 0;
+    let orphans_dir = assets_dir.join("orphans");
+
+    if let Ok(entries) = fs::read_dir(&assets_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let filename = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+
+            if !referenced.contains(&filename) {
+                // Move to orphans
+                fs::create_dir_all(&orphans_dir).map_err(|e| e.to_string())?;
+                let dest = orphans_dir.join(&filename);
+                fs::rename(&path, &dest).map_err(|e| e.to_string())?;
+                moved += 1;
+            }
+        }
+    }
+
+    Ok(moved)
+}
+
+#[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -204,7 +331,11 @@ pub fn run() {
             is_directory,
             list_system_fonts,
             run_ffprobe,
+            generate_waveform,
             show_in_folder,
+            save_asset,
+            read_asset,
+            cleanup_orphaned_assets,
             exit_app,
         ])
         .run(tauri::generate_context!())
