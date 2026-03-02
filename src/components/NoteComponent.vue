@@ -267,8 +267,8 @@ const noteStyle = computed(() => {
     style.width = `${props.note.width}px`
   } else if (props.spatial) {
     style.width = 'max-content'
-    style.minWidth = '120px'
-    style.maxWidth = '500px'
+    style.minWidth = '240px'
+    style.maxWidth = '600px'
   }
 
   if (props.note.height && props.note.height !== 'auto') {
@@ -853,12 +853,13 @@ function extractPlainText(content: any): string {
   border: 1.5px solid var(--note-border);
   border-radius: 6px;
   color: var(--text-primary);
-  overflow: clip;
+  overflow: hidden;
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
   position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .note-outer:hover:not(.is-selected) > .note-frame {
