@@ -68,6 +68,15 @@ export async function loadPage(pageId: string) {
     currentPage.value = page
     currentPageId.value = pageId
     rebuildParentMap()
+
+    // Compact z-indexes: renumber to sequential 1,2,3… preserving order
+    const sorted = [...notes.values()].sort((a, b) => a.zIndex - b.zIndex)
+    for (let i = 0; i < sorted.length; i++) {
+      sorted[i].zIndex = i + 1
+    }
+    if (currentPage.value) {
+      currentPage.value.nextZIndex = sorted.length + 1
+    }
   } finally {
     loading.value = false
   }

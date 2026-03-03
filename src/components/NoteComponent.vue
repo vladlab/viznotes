@@ -982,6 +982,7 @@ function extractPlainText(content: any): string {
   cursor: grab;
   user-select: none;
   contain: layout style;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .note-outer:active:not(.is-editing) {
