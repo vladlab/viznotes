@@ -982,7 +982,6 @@ function extractPlainText(content: any): string {
   cursor: grab;
   user-select: none;
   contain: layout style;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .note-outer:active:not(.is-editing) {
@@ -1020,6 +1019,7 @@ function extractPlainText(content: any): string {
   border-radius: 6px;
   color: var(--text-primary);
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
   position: relative;
   height: 100%;
@@ -1029,19 +1029,19 @@ function extractPlainText(content: any): string {
 }
 
 .note-outer:hover:not(.is-selected) > .note-frame {
-  box-shadow: 0 0 0 1px var(--note-color);
+  box-shadow: 0 0 0 1px var(--note-color), 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Selected state: blue highlight */
 .note-outer.is-selected > .note-frame {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Editing state: stronger blue */
 .note-outer.is-editing > .note-frame {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Collapsed container: stacked-card effect */
