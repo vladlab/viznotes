@@ -110,6 +110,13 @@ fn is_directory(path: String) -> bool {
 }
 
 #[tauri::command]
+fn get_file_size(path: String) -> Result<u64, String> {
+    fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| format!("Failed to get file size: {}", e))
+}
+
+#[tauri::command]
 fn list_system_fonts() -> Result<Vec<String>, String> {
     let output = std::process::Command::new("fc-list")
         .args(["--format", "%{family[0]}\n"])
@@ -329,6 +336,7 @@ pub fn run() {
             write_text_file,
             remove_file,
             is_directory,
+            get_file_size,
             list_system_fonts,
             run_ffprobe,
             generate_waveform,

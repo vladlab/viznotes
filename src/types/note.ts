@@ -68,6 +68,7 @@ export interface Note {
   color: NoteColor
   nodeType: string  // key from NODE_TYPES
   link: string   // page ID, URL, or empty
+  fileSize?: number  // file size in bytes (for file-linked notes)
 
   collapsed: boolean
   movable: boolean

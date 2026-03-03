@@ -740,6 +740,13 @@ function fileEmoji(filename: string): string {
   return FILE_EMOJI_MAP[ext] || '📎'
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
 /**
  * Hit-test the drop position against existing file-linked notes.
  * Returns the Note if found, null otherwise.
@@ -765,14 +772,24 @@ function findFileNoteAtPoint(clientX: number, clientY: number) {
 async function handleFileReplacement(note: any, newName: string, newPath: string) {
   try {
     const { ask } = await import('@tauri-apps/plugin-dialog')
+    const { invoke } = await import('@tauri-apps/api/core')
 
     // Get old filename from path
     const oldPath = note.link || ''
     const oldParts = oldPath.replace(/\\/g, '/').split('/')
     const oldName = oldParts[oldParts.length - 1] || oldPath
 
+    // Get file sizes
+    const oldSize = note.fileSize ? ` (${formatFileSize(note.fileSize)})` : ''
+    let newSize = ''
+    let newBytes: number | undefined
+    try {
+      newBytes = await invoke<number>('get_file_size', { path: newPath })
+      newSize = ` (${formatFileSize(newBytes)})`
+    } catch {}
+
     const confirmed = await ask(
-      `Update file reference?\n\n"${oldName}"\n→ "${newName}"`,
+      `Update file reference?\n\n"${oldName}"${oldSize}\n→ "${newName}"${newSize}`,
       { title: 'Replace file', kind: 'info', okLabel: 'Replace', cancelLabel: 'Cancel' }
     )
     if (!confirmed) return
@@ -809,6 +826,7 @@ async function handleFileReplacement(note: any, newName: string, newPath: string
     // Update note
     note.head.content = { type: 'doc', content: headParagraphs }
     note.link = newPath
+    note.fileSize = newBytes
     note.body.enabled = true
     note.body.content = { type: 'doc', content: bodyBlocks }
 
@@ -879,6 +897,14 @@ async function createNotesFromDrop(
       startEditing: false,
       enableBody: true,
     })
+
+    // Store file size
+    if (filePath && !isFolder) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        note.fileSize = await invoke<number>('get_file_size', { path: filePath })
+      } catch {}
+    }
 
     createdNoteIds.push(note.id)
   }
