@@ -1474,6 +1474,7 @@ onUnmounted(() => {
   background: var(--bg-canvas);
   cursor: crosshair;
   outline: none;
+  user-select: none;
 }
 
 .canvas-container.is-panning {
