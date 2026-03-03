@@ -685,8 +685,12 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
 
     // Video codec
     if (videoStream) {
+      const profile = videoStream.profile && videoStream.profile !== 'unknown' ? ` ${videoStream.profile}` : ''
       const res = videoStream.width && videoStream.height ? ` (${videoStream.width}×${videoStream.height})` : ''
-      lines.push(`Video: ${videoStream.codec_name}${res}`)
+      lines.push(`Video: ${videoStream.codec_name}${profile}${res}`)
+      if (videoStream.pix_fmt) {
+        lines.push(`Pixel format: ${videoStream.pix_fmt}`)
+      }
     }
 
     // Audio codec (first stream's codec as summary)

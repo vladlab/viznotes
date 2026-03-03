@@ -173,6 +173,7 @@ import type { Note } from '../types/note'
 import type { ResizeHandle } from '../composables/useResize'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
+import { getStorage } from '../stores/state'
 import { settings } from '../stores/settings'
 import { loadUserTheme } from '../utils/themeLoader'
 import NoteComponent from './NoteComponent.vue'
@@ -607,6 +608,15 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Export selected notes
+  if (isCtrl && e.key === 'e' && !appStore.editingNoteId.value) {
+    e.preventDefault()
+    if (appStore.selectedNoteIds.size > 0) {
+      exportSelectedNotes().catch(console.error)
+    }
+    return
+  }
+
   // Cancel linking mode
   if (e.key === 'Escape' && appStore.linkingSourceId.value) {
     e.preventDefault()
@@ -834,6 +844,290 @@ async function handleFileReplacement(note: any, newName: string, newPath: string
     appStore.pushNotePropertyAction(note.id, before, 'Replace file')
   } catch (e) {
     console.error('File replacement failed:', e)
+  }
+}
+
+// ── Export selected notes to HTML ──
+
+/** Escape HTML entities */
+function esc(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Convert Tiptap inline content (marks + text) to HTML */
+function inlineToHtml(nodes: any[]): string {
+  if (!nodes) return ''
+  let out = ''
+  for (const node of nodes) {
+    if (node.type === 'text') {
+      let html = esc(node.text || '')
+      const marks = node.marks || []
+      for (const mark of marks) {
+        switch (mark.type) {
+          case 'bold': html = `<strong>${html}</strong>`; break
+          case 'italic': html = `<em>${html}</em>`; break
+          case 'strike': html = `<s>${html}</s>`; break
+          case 'code': html = `<code>${html}</code>`; break
+          case 'underline': html = `<u>${html}</u>`; break
+          case 'link': {
+            const href = esc(mark.attrs?.href || '')
+            html = `<a href="${href}">${html}</a>`
+            break
+          }
+        }
+      }
+      out += html
+    } else if (node.type === 'hardBreak') {
+      out += '<br>'
+    }
+  }
+  return out
+}
+
+/** Convert a Tiptap JSON doc to HTML. Collects image filenames for asset copying. */
+function tiptapToHtml(doc: any, images: Set<string>): string {
+  if (!doc?.content) return ''
+  const parts: string[] = []
+
+  for (const node of doc.content) {
+    switch (node.type) {
+      case 'paragraph':
+        parts.push(`<p>${inlineToHtml(node.content)}</p>`)
+        break
+
+      case 'heading': {
+        const level = Math.min(node.attrs?.level || 1, 6)
+        parts.push(`<h${level}>${inlineToHtml(node.content)}</h${level}>`)
+        break
+      }
+
+      case 'bulletList':
+        if (node.content) {
+          parts.push('<ul>')
+          for (const li of node.content) {
+            if (li.type === 'listItem' && li.content) {
+              parts.push(`<li>${li.content.map((c: any) => {
+                if (c.type === 'paragraph') return inlineToHtml(c.content)
+                return tiptapToHtml({ content: [c] }, images)
+              }).join('')}</li>`)
+            }
+          }
+          parts.push('</ul>')
+        }
+        break
+
+      case 'orderedList':
+        if (node.content) {
+          parts.push('<ol>')
+          for (const li of node.content) {
+            if (li.type === 'listItem' && li.content) {
+              parts.push(`<li>${li.content.map((c: any) => {
+                if (c.type === 'paragraph') return inlineToHtml(c.content)
+                return tiptapToHtml({ content: [c] }, images)
+              }).join('')}</li>`)
+            }
+          }
+          parts.push('</ol>')
+        }
+        break
+
+      case 'taskList':
+        if (node.content) {
+          parts.push('<ul class="task-list">')
+          for (const ti of node.content) {
+            if (ti.type === 'taskItem') {
+              const checked = ti.attrs?.checked ? ' checked' : ''
+              const firstP = ti.content?.[0]
+              parts.push(`<li><input type="checkbox" disabled${checked}> ${inlineToHtml(firstP?.content)}</li>`)
+            }
+          }
+          parts.push('</ul>')
+        }
+        break
+
+      case 'blockquote':
+        if (node.content) {
+          parts.push(`<blockquote>${tiptapToHtml({ content: node.content }, images)}</blockquote>`)
+        }
+        break
+
+      case 'codeBlock': {
+        const lang = node.attrs?.language ? ` class="language-${esc(node.attrs.language)}"` : ''
+        const codeText = node.content?.map((n: any) => n.text || '').join('') || ''
+        parts.push(`<pre><code${lang}>${esc(codeText)}</code></pre>`)
+        break
+      }
+
+      case 'horizontalRule':
+        parts.push('<hr>')
+        break
+
+      case 'image': {
+        const src = node.attrs?.src || ''
+        if (src && !src.startsWith('data:') && !src.startsWith('http')) {
+          images.add(src)
+          parts.push(`<img src="export_assets/${esc(src)}">`)
+        } else if (src.startsWith('http')) {
+          parts.push(`<img src="${esc(src)}">`)
+        }
+        break
+      }
+
+      case 'table':
+        if (node.content) {
+          parts.push('<table>')
+          for (let ri = 0; ri < node.content.length; ri++) {
+            const row = node.content[ri]
+            if (row.type !== 'tableRow') continue
+            const tag = ri === 0 ? 'th' : 'td'
+            const cells = (row.content || []).map((c: any) => {
+              const cellContent = c.content?.[0]
+              return `<${tag}>${inlineToHtml(cellContent?.content)}</${tag}>`
+            })
+            parts.push(`<tr>${cells.join('')}</tr>`)
+          }
+          parts.push('</table>')
+        }
+        break
+    }
+  }
+
+  return parts.join('\n')
+}
+
+/** Convert a note (and its children recursively) to HTML */
+function noteToHtml(noteId: string, headingLevel: number, images: Set<string>): string {
+  const note = appStore.notes.get(noteId)
+  if (!note) return ''
+
+  const parts: string[] = []
+  const hLevel = Math.min(headingLevel, 6)
+
+  // Head → heading
+  if (note.head.enabled && note.head.content) {
+    const headHtml = tiptapToHtml(note.head.content, images)
+    // Extract text from paragraphs to use as heading
+    const doc = note.head.content
+    if (doc?.content) {
+      const firstP = doc.content[0]
+      if (firstP) {
+        parts.push(`<h${hLevel}>${inlineToHtml(firstP.content)}</h${hLevel}>`)
+        // Additional head paragraphs as regular text
+        for (let i = 1; i < doc.content.length; i++) {
+          parts.push(tiptapToHtml({ content: [doc.content[i]] }, images))
+        }
+      }
+    }
+  }
+
+  // Body
+  if (note.body.enabled && note.body.content) {
+    parts.push(tiptapToHtml(note.body.content, images))
+  }
+
+  // Container children (recurse)
+  if (note.container.enabled && note.container.childIds.length > 0) {
+    for (const childId of note.container.childIds) {
+      parts.push(noteToHtml(childId, headingLevel + 1, images))
+    }
+  }
+
+  return parts.join('\n')
+}
+
+const EXPORT_CSS = `
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 0 20px;
+  color: #1a1a1a;
+  line-height: 1.6;
+}
+h1, h2, h3, h4, h5, h6 { margin-top: 1.5em; margin-bottom: 0.5em; }
+h1 { border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
+img { max-width: 100%; height: auto; margin: 8px 0; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
+th { background: #f5f5f5; }
+blockquote { border-left: 4px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #555; }
+pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
+code { background: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+ul.task-list { list-style: none; padding-left: 0; }
+ul.task-list li { padding: 2px 0; }
+`.trim()
+
+async function exportSelectedNotes() {
+  const selectedIds = Array.from(appStore.selectedNoteIds)
+  if (selectedIds.length === 0) return
+
+  // Sort spatially: top-to-bottom, left-to-right
+  const notes = selectedIds
+    .map(id => appStore.notes.get(id))
+    .filter(Boolean) as any[]
+  notes.sort((a, b) => {
+    const rowDiff = a.pos.y - b.pos.y
+    if (Math.abs(rowDiff) > 50) return rowDiff
+    return a.pos.x - b.pos.x
+  })
+
+  // Convert to HTML
+  const images = new Set<string>()
+  const bodyParts: string[] = []
+  for (let i = 0; i < notes.length; i++) {
+    if (i > 0) bodyParts.push('<hr>')
+    bodyParts.push(noteToHtml(notes[i].id, 1, images))
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Export</title>
+<style>
+${EXPORT_CSS}
+</style>
+</head>
+<body>
+${bodyParts.join('\n')}
+</body>
+</html>`
+
+  // Show save dialog
+  try {
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    const savePath = await save({
+      title: 'Export notes',
+      defaultPath: 'export.html',
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+    })
+    if (!savePath) return
+
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('write_text_file', { path: savePath, contents: html })
+
+    // Copy images to assets folder alongside the .html file
+    if (images.size > 0) {
+      const storage = getStorage()
+      const vaultPath = storage.getVaultPath()
+      const htmlDir = savePath.replace(/[/\\][^/\\]*$/, '')
+      const assetsDir = `${htmlDir}/export_assets`
+
+      for (const filename of images) {
+        try {
+          const src = `${vaultPath}/assets/${filename}`
+          const dest = `${assetsDir}/${filename}`
+          await invoke('copy_file', { src, dest })
+        } catch (e) {
+          console.warn(`[export] Failed to copy asset ${filename}:`, e)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Export failed:', e)
   }
 }
 

@@ -117,6 +117,16 @@ fn get_file_size(path: String) -> Result<u64, String> {
 }
 
 #[tauri::command]
+fn copy_file(src: String, dest: String) -> Result<(), String> {
+    let dest_path = Path::new(&dest);
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::copy(&src, &dest).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn list_system_fonts() -> Result<Vec<String>, String> {
     let output = std::process::Command::new("fc-list")
         .args(["--format", "%{family[0]}\n"])
@@ -337,6 +347,7 @@ pub fn run() {
             remove_file,
             is_directory,
             get_file_size,
+            copy_file,
             list_system_fonts,
             run_ffprobe,
             generate_waveform,
