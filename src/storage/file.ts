@@ -41,6 +41,10 @@ async function removeFile(path: string): Promise<void> {
   await (await getInvoke())('remove_file', { path })
 }
 
+async function listDir(path: string): Promise<string[]> {
+  return (await getInvoke())('list_dir', { path })
+}
+
 interface MetaFile { version: 1; pages: PageSummary[] }
 interface PageFile { page: Page; notes: Note[]; arrows: Arrow[]; links: Link[] }
 
@@ -61,8 +65,29 @@ export class FileStorage implements StorageBackend {
         this.meta = await readJson<MetaFile>(metaPath)
         console.log(`[FileStorage] Loaded ${this.meta.pages.length} pages from ${this.vaultPath}`)
       } catch (e) {
-        console.error('[FileStorage] Corrupt meta.json, resetting:', e)
+        console.error('[FileStorage] Corrupt meta.json, attempting recovery:', e)
         this.meta = { version: 1, pages: [] }
+        try {
+          const files = await listDir(`${this.vaultPath}/pages`)
+          for (const file of files) {
+            if (!file.endsWith('.json')) continue
+            const pageId = file.replace('.json', '')
+            try {
+              const data = await readJson<PageFile>(this.pageFilePath(pageId))
+              if (data?.page) {
+                this.pageCache.set(pageId, data)
+                this.meta.pages.push({
+                  id: data.page.id,
+                  title: data.page.title,
+                  updatedAt: data.page.updatedAt,
+                })
+              }
+            } catch { /* skip unreadable page files */ }
+          }
+          console.log(`[FileStorage] Recovered ${this.meta.pages.length} pages from disk`)
+        } catch (scanErr) {
+          console.error('[FileStorage] Could not scan pages directory:', scanErr)
+        }
         await this.writeMeta()
       }
     } else {

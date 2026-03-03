@@ -110,6 +110,20 @@ fn is_directory(path: String) -> bool {
 }
 
 #[tauri::command]
+fn list_dir(path: String) -> Result<Vec<String>, String> {
+    let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
+    let mut names = Vec::new();
+    for entry in entries {
+        if let Ok(entry) = entry {
+            if let Some(name) = entry.file_name().to_str() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    Ok(names)
+}
+
+#[tauri::command]
 fn get_file_size(path: String) -> Result<u64, String> {
     fs::metadata(&path)
         .map(|m| m.len())
@@ -346,6 +360,7 @@ pub fn run() {
             write_text_file,
             remove_file,
             is_directory,
+            list_dir,
             get_file_size,
             copy_file,
             list_system_fonts,

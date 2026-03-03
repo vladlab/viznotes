@@ -167,6 +167,7 @@ export async function flushPendingSaves() {
   }
 
   // Write to storage — single writePageFile when both are dirty
+  try {
   if (pendingPage && currentPage.value && notesToSave.length > 0) {
     // Combined: page metadata + notes in one atomic write
     currentPage.value.updatedAt = now
@@ -176,6 +177,13 @@ export async function flushPendingSaves() {
   } else if (pendingPage && currentPage.value) {
     currentPage.value.updatedAt = now
     await storage.savePage(toRaw(currentPage.value))
+    }
+  } catch (e) {
+    console.error("[flushPendingSaves] Write failed, re-queuing:", e)
+    if (pendingNoteIds) { for (const id of pendingNoteIds) dirtyNoteIds.add(id) }
+    if (pendingPage) dirtyPage.value = true
+    scheduleSave(1000)
+    return
   }
 
   // Only clear the pending indicator if nothing new arrived during the flush.
