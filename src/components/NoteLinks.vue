@@ -10,6 +10,10 @@
         @dblclick.stop="selectLinked(ln.noteId)"
         :title="ln.title"
       >
+        <svg class="link-chip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+        </svg>
         <span class="link-chip-title">{{ ln.title }}</span>
         <button
           class="link-chip-remove"
@@ -90,34 +94,27 @@ function removeLink(linkId: string) {
 .note-link-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 6px;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
   font-size: 0.85em;
   cursor: pointer;
   user-select: none;
-  background:
-    repeating-linear-gradient(
-      -45deg,
-      transparent,
-      transparent 3px,
-      color-mix(in srgb, var(--chip-color) 12%, transparent) 3px,
-      color-mix(in srgb, var(--chip-color) 12%, transparent) 6px
-    );
-  border: 1.5px dashed color-mix(in srgb, var(--chip-color) 85%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 15%, transparent);
+  border: none;
+  border-left: 4px solid var(--chip-color);
   color: var(--text-secondary);
   transition: background 0.15s;
 }
 
 .note-link-chip:hover {
-  background:
-    repeating-linear-gradient(
-      -45deg,
-      transparent,
-      transparent 3px,
-      color-mix(in srgb, var(--chip-color) 22%, transparent) 3px,
-      color-mix(in srgb, var(--chip-color) 22%, transparent) 6px
-    );
+  background: color-mix(in srgb, var(--chip-color) 28%, transparent);
+}
+
+.link-chip-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+  color: var(--chip-color);
 }
 
 .link-chip-title {
