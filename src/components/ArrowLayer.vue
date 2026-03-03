@@ -1,8 +1,6 @@
 <template>
-  <svg class="arrow-layer" :style="{ transform: transformCSS }">
-    <defs>
-    </defs>
-
+  <!-- Arrow lines layer (behind notes) -->
+  <svg class="arrow-layer arrow-lines-layer" :style="{ transform: transformCSS }">
     <!-- Existing arrows -->
     <g
       v-for="arrow in renderedArrows"
@@ -51,7 +49,10 @@
       :fill="accentColor"
       :opacity="dragging.mode === 'create' ? 0.7 : 1"
     />
+  </svg>
 
+  <!-- Connector handles layer (above notes) -->
+  <svg class="arrow-layer arrow-handles-layer" :style="{ transform: transformCSS }">
     <!-- Source connector handles on selected notes -->
     <template v-for="handle in connectorHandles" :key="handle.noteId + handle.side">
       <circle
@@ -824,8 +825,15 @@ function findNoteAtPoint(clientX: number, clientY: number, excludeId: string): s
   height: 100%;
   transform-origin: 0 0;
   pointer-events: none;
-  z-index: 0;
   overflow: visible;
+}
+
+.arrow-lines-layer {
+  z-index: 0;
+}
+
+.arrow-handles-layer {
+  z-index: 9999;
 }
 
 .arrow-group {
@@ -863,7 +871,7 @@ function findNoteAtPoint(clientX: number, clientY: number, excludeId: string): s
   transition: opacity 0.15s ease, r 0.1s ease;
 }
 
-.arrow-layer:hover .connector-handle {
+.arrow-handles-layer:hover .connector-handle {
   opacity: 0.8;
 }
 
