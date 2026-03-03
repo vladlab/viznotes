@@ -110,6 +110,7 @@
     <Teleport to="body">
       <div
         v-if="contextMenuVisible"
+        ref="contextMenuRef"
         class="context-menu"
         :style="{ left: `${contextMenuPos.x}px`, top: `${contextMenuPos.y}px` }"
         @pointerdown.stop
@@ -207,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, inject, onBeforeUnmount } from 'vue'
+import { computed, ref, inject, onBeforeUnmount, nextTick } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import { appStore } from '../stores/app'
@@ -245,6 +246,7 @@ const isDropTarget = computed(() => dropTargetId.value === props.note.id)
 // Context menu
 const contextMenuVisible = ref(false)
 const contextMenuPos = ref({ x: 0, y: 0 })
+const contextMenuRef = ref<HTMLElement | null>(null)
 
 const hasMultipleSections = computed(() => {
   let count = 0
@@ -396,6 +398,20 @@ function showContextMenu(e: MouseEvent) {
   pagePickerVisible.value = false
   typePickerVisible.value = false
 
+  // Clamp to viewport after render
+  nextTick(() => {
+    const el = contextMenuRef.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const pad = 8
+    let { x, y } = contextMenuPos.value
+    if (rect.right > window.innerWidth - pad) x = window.innerWidth - rect.width - pad
+    if (rect.bottom > window.innerHeight - pad) y = window.innerHeight - rect.height - pad
+    if (x < pad) x = pad
+    if (y < pad) y = pad
+    contextMenuPos.value = { x, y }
+  })
+
   // Clean up any previous listeners
   if (contextMenuCleanup) contextMenuCleanup()
 
@@ -463,8 +479,32 @@ const pagePickerInput = ref<HTMLInputElement | null>(null)
 // Node type picker
 const typePickerVisible = ref(false)
 
+function clampSubmenu(el: HTMLElement | null) {
+  if (!el) return
+  // Reset any previous flip
+  el.style.left = ''
+  el.style.right = ''
+  el.style.top = ''
+  const rect = el.getBoundingClientRect()
+  const pad = 8
+  if (rect.right > window.innerWidth - pad) {
+    el.style.left = 'auto'
+    el.style.right = '100%'
+  }
+  if (rect.bottom > window.innerHeight - pad) {
+    const overflow = rect.bottom - window.innerHeight + pad
+    el.style.top = `${-overflow}px`
+  }
+}
+
 function toggleTypePicker() {
   typePickerVisible.value = !typePickerVisible.value
+  if (typePickerVisible.value) {
+    nextTick(() => {
+      const el = document.querySelector('.type-picker-panel') as HTMLElement
+      clampSubmenu(el)
+    })
+  }
 }
 
 function setNodeType(typeKey: string) {
@@ -513,6 +553,11 @@ function togglePagePicker() {
   if (pagePickerVisible.value) {
     pagePickerSearch.value = ''
     setTimeout(() => pagePickerInput.value?.focus(), 0)
+    nextTick(() => {
+      const panels = document.querySelectorAll('.submenu-panel:not(.type-picker-panel)')
+      const el = panels[panels.length - 1] as HTMLElement
+      clampSubmenu(el)
+    })
   }
 }
 

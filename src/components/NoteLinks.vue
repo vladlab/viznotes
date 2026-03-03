@@ -6,16 +6,22 @@
         :key="ln.linkId"
         class="note-link-chip"
         :style="ln.chipStyle"
-        @click.stop="selectLinked(ln.noteId)"
-        @dblclick.stop="selectLinked(ln.noteId)"
         :title="ln.title"
       >
+        <div
+          class="link-chip-chevron"
+          @click.stop="selectLinked(ln.noteId)"
+          @dblclick.stop
+          :title="`Go to ${ln.title}`"
+        >
+          <span v-if="ln.typeLabel" class="link-chip-type">{{ ln.typeLabel }}</span>
+        </div>
         <span class="link-chip-title">{{ ln.title }}</span>
         <button
           class="link-chip-remove"
           @click.stop="removeLink(ln.linkId)"
           title="Remove link"
-        >×</button>
+        >&times;</button>
       </div>
     </div>
   </div>
@@ -24,8 +30,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Note } from '../types/note'
+import { NODE_TYPES, getNoteColor } from '../types/note'
 import { appStore } from '../stores/app'
-import { getNoteColor } from '../types/note'
 
 const props = defineProps<{
   note: Note
@@ -51,10 +57,13 @@ const linkedNotes = computed(() => {
     const otherNote = appStore.notes.get(otherId)
     const title = otherNote ? getPlainText(otherNote.head.content) : 'Deleted'
     const color = otherNote ? getNoteColor(otherNote.color.value) : '#888'
+    const nodeType = otherNote?.nodeType || 'default'
+    const typeLabel = NODE_TYPES[nodeType]?.label || ''
     return {
       linkId: link.id,
       noteId: otherId,
       title,
+      typeLabel,
       chipStyle: {
         '--chip-color': color,
       },
@@ -89,12 +98,11 @@ function removeLink(linkId: string) {
 
 .note-link-chip {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 6px;
-  padding: 4px 10px 4px 38px;
+  padding: 0 8px 0 0;
   border-radius: 4px;
   font-size: 0.85em;
-  cursor: pointer;
   user-select: none;
   background: color-mix(in srgb, var(--chip-color) 15%, transparent);
   border: none;
@@ -102,27 +110,47 @@ function removeLink(linkId: string) {
   transition: background 0.15s;
   position: relative;
   overflow: hidden;
-}
-
-.note-link-chip::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 36px;
-  background: var(--chip-color);
-  clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%);
+  min-height: 28px;
 }
 
 .note-link-chip:hover {
   background: color-mix(in srgb, var(--chip-color) 28%, transparent);
 }
 
+.link-chip-chevron {
+  flex-shrink: 0;
+  width: 60px;
+  background: var(--chip-color);
+  clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 10px;
+  cursor: pointer;
+}
+
+.link-chip-chevron:hover {
+  filter: brightness(1.2);
+}
+
+.link-chip-type {
+  font-size: 0.5em;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
 .link-chip-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .link-chip-remove {
@@ -136,6 +164,9 @@ function removeLink(linkId: string) {
   opacity: 0;
   transition: opacity 0.15s;
   flex-shrink: 0;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
 }
 
 .note-link-chip:hover .link-chip-remove {

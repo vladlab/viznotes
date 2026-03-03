@@ -1,7 +1,7 @@
 <template>
   <div class="sidebar" :class="{ collapsed: !expanded }">
     <div class="sidebar-header">
-      <h2 v-if="expanded">vizNotes</h2>
+      <h2 v-if="expanded"><span class="logo-viz">viz</span><span class="logo-notes">Notes</span></h2>
       <button class="sidebar-toggle" @click="expanded = !expanded">
         <svg width="16" height="16" viewBox="0 0 16 16">
           <path
@@ -265,11 +265,21 @@ async function importFile(e: Event) {
 }
 
 .sidebar-header h2 {
-  font-size: 0.95em;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-size: 1.1em;
+  font-weight: 700;
+  color: var(--text-primary);
   margin: 0;
   white-space: nowrap;
+  letter-spacing: -0.02em;
+}
+
+.logo-viz {
+  color: inherit;
+  font-weight: 800;
+}
+
+.logo-notes {
+  font-weight: 600;
 }
 
 .sidebar-toggle {
@@ -285,7 +295,7 @@ async function importFile(e: Event) {
 
 .sidebar-toggle:hover {
   background: var(--bg-surface-hover);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .sidebar-nav {
@@ -305,7 +315,7 @@ async function importFile(e: Event) {
 
 .nav-back:hover {
   background: var(--bg-surface-hover);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .page-list {
@@ -324,7 +334,7 @@ async function importFile(e: Event) {
   flex: 1;
   background: var(--bg-input);
   border: 1px solid var(--border-input);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   padding: 6px 10px;
   font-size: 0.8em;
   border-radius: 6px;
@@ -357,7 +367,7 @@ async function importFile(e: Event) {
 
 .new-page-btn-icon:hover {
   background: var(--bg-surface-hover);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   border-color: var(--border-input-focus);
 }
 
@@ -380,7 +390,7 @@ async function importFile(e: Event) {
 
 .page-title {
   font-size: 0.85em;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -419,7 +429,7 @@ async function importFile(e: Event) {
 
 .footer-btn:hover {
   background: var(--bg-surface-hover);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .settings-btn {
@@ -450,7 +460,7 @@ async function importFile(e: Event) {
 }
 
 .confirm-dialog p {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 0.92em;
   margin: 0;
 }
@@ -483,7 +493,7 @@ async function importFile(e: Event) {
 
 .confirm-cancel:hover {
   background: var(--bg-surface-hover);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .confirm-delete {

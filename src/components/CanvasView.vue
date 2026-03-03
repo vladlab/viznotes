@@ -147,10 +147,16 @@
       </div>
     </div>
 
+    <!-- Toast notification -->
+    <Transition name="toast-fade">
+      <div v-if="toastMessage" class="canvas-toast">{{ toastMessage }}</div>
+    </Transition>
+
     <!-- Canvas context menu -->
     <Teleport to="body">
       <div
         v-if="canvasMenuVisible"
+        ref="canvasMenuRef"
         class="context-menu"
         :style="{ left: `${canvasMenuPos.x}px`, top: `${canvasMenuPos.y}px` }"
         @pointerdown.stop
@@ -187,6 +193,15 @@ const fileReplaceTargetId = ref<string | null>(null)
 // Canvas context menu
 const canvasMenuVisible = ref(false)
 const canvasMenuPos = ref({ x: 0, y: 0 })
+const canvasMenuRef = ref<HTMLElement | null>(null)
+
+const toastMessage = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function showToast(msg: string, duration = 2000) {
+  toastMessage.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMessage.value = '' }, duration)
+}
 const canvasMenuWorldPos = ref({ x: 0, y: 0 })
 let lastDragClientX = 0
 let lastDragClientY = 0
@@ -493,6 +508,19 @@ function onCanvasContextMenu(e: MouseEvent) {
   canvasMenuWorldPos.value = canvas.clientToWorld(e.clientX, e.clientY)
   canvasMenuVisible.value = true
 
+  nextTick(() => {
+    const el = canvasMenuRef.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const pad = 8
+    let { x, y } = canvasMenuPos.value
+    if (rect.right > window.innerWidth - pad) x = window.innerWidth - rect.width - pad
+    if (rect.bottom > window.innerHeight - pad) y = window.innerHeight - rect.height - pad
+    if (x < pad) x = pad
+    if (y < pad) y = pad
+    canvasMenuPos.value = { x, y }
+  })
+
   if (canvasMenuCleanup) canvasMenuCleanup()
 
   const close = (ev: Event) => {
@@ -608,11 +636,20 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
-  // Export selected notes
-  if (isCtrl && e.key === 'e' && !appStore.editingNoteId.value) {
+  // Export selected notes to clipboard as rich text
+  if (isCtrl && e.key === 'e' && !e.shiftKey && !appStore.editingNoteId.value) {
     e.preventDefault()
     if (appStore.selectedNoteIds.size > 0) {
       exportSelectedNotes().catch(console.error)
+    }
+    return
+  }
+
+  // Export selected file notes to clipboard as spreadsheet table
+  if (isCtrl && e.shiftKey && (e.key === 'e' || e.key === 'E') && !appStore.editingNoteId.value) {
+    e.preventDefault()
+    if (appStore.selectedNoteIds.size > 0) {
+      exportFileTable().catch(console.error)
     }
     return
   }
@@ -1041,7 +1078,6 @@ body {
   max-width: 800px;
   margin: 40px auto;
   padding: 0 20px;
-  color: #1a1a1a;
   line-height: 1.6;
 }
 h1, h2, h3, h4, h5, h6 { margin-top: 1.5em; margin-bottom: 0.5em; }
@@ -1050,7 +1086,7 @@ img { max-width: 100%; height: auto; margin: 8px 0; }
 table { border-collapse: collapse; margin: 1em 0; }
 th, td { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
 th { background: #f5f5f5; }
-blockquote { border-left: 4px solid #ddd; margin: 1em 0; padding: 0.5em 1em; color: #555; }
+blockquote { border-left: 4px solid #ddd; margin: 1em 0; padding: 0.5em 1em; }
 pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
 code { background: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
 pre code { background: none; padding: 0; }
@@ -1078,56 +1114,108 @@ async function exportSelectedNotes() {
   const bodyParts: string[] = []
   for (let i = 0; i < notes.length; i++) {
     if (i > 0) bodyParts.push('<hr>')
-    bodyParts.push(noteToHtml(notes[i].id, 1, images))
+    bodyParts.push(noteToHtml(notes[i].id, 2, images))
   }
 
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Export</title>
-<style>
-${EXPORT_CSS}
-</style>
-</head>
-<body>
-${bodyParts.join('\n')}
-</body>
-</html>`
+  let htmlBody = bodyParts.join('\n')
 
-  // Show save dialog
-  try {
-    const { save } = await import('@tauri-apps/plugin-dialog')
-    const savePath = await save({
-      title: 'Export notes',
-      defaultPath: 'export.html',
-      filters: [{ name: 'HTML', extensions: ['html'] }],
-    })
-    if (!savePath) return
-
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('write_text_file', { path: savePath, contents: html })
-
-    // Copy images to assets folder alongside the .html file
-    if (images.size > 0) {
+  // Embed images as data URIs for clipboard compatibility
+  if (images.size > 0) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
       const storage = getStorage()
       const vaultPath = storage.getVaultPath()
-      const htmlDir = savePath.replace(/[/\\][^/\\]*$/, '')
-      const assetsDir = `${htmlDir}/export_assets`
 
       for (const filename of images) {
         try {
-          const src = `${vaultPath}/assets/${filename}`
-          const dest = `${assetsDir}/${filename}`
-          await invoke('copy_file', { src, dest })
+          const base64 = await invoke<string>('read_asset', { vaultPath, filename })
+          const ext = filename.split('.').pop()?.toLowerCase() || 'png'
+          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+            : ext === 'gif' ? 'image/gif'
+            : ext === 'webp' ? 'image/webp'
+            : 'image/png'
+          htmlBody = htmlBody.replaceAll(
+            `src="export_assets/${esc(filename)}"`,
+            `src="data:${mime};base64,${base64}"`
+          )
         } catch (e) {
-          console.warn(`[export] Failed to copy asset ${filename}:`, e)
+          console.warn(`[export] Failed to read asset ${filename}:`, e)
         }
       }
+    } catch (e) {
+      console.warn('[export] Failed to embed images:', e)
     }
+  }
+
+  const html = `<html><head><style>${EXPORT_CSS}</style></head><body>${htmlBody}</body></html>`
+
+  // Copy to clipboard as rich text
+  try {
+    const blob = new Blob([html], { type: 'text/html' })
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': blob,
+        'text/plain': new Blob([htmlBody.replace(/<[^>]*>/g, '')], { type: 'text/plain' }),
+      })
+    ])
+    console.log('[export] Copied to clipboard')
+    showToast('Copied to clipboard')
   } catch (e) {
-    console.error('Export failed:', e)
+    console.error('Clipboard write failed:', e)
+  }
+}
+
+/**
+ * Export selected file notes as a tab-separated table to clipboard.
+ * Pasteable into Google Sheets, Excel, etc.
+ */
+async function exportFileTable() {
+  const selectedIds = Array.from(appStore.selectedNoteIds)
+  if (selectedIds.length === 0) return
+
+  // Filter to file notes, sort spatially
+  const fileNotes = selectedIds
+    .map(id => appStore.notes.get(id))
+    .filter(n => n && n.link && !n.link.startsWith('page:')) as any[]
+
+  if (fileNotes.length === 0) return
+
+  fileNotes.sort((a, b) => {
+    const rowDiff = a.pos.y - b.pos.y
+    if (Math.abs(rowDiff) > 50) return rowDiff
+    return a.pos.x - b.pos.x
+  })
+
+  const rows = fileNotes.map(note => {
+    const fullPath = note.link || ''
+    const parts = fullPath.replace(/\\/g, '/').split('/')
+    const filename = parts[parts.length - 1] || fullPath
+    const dir = parts.slice(0, -1).join('/')
+    return `${filename}\t${dir}`
+  })
+
+  const tsv = rows.join('\n')
+
+  // Build HTML table for rich-text paste targets (email, docs)
+  const htmlRows = rows.map(row => {
+    const [name, dir] = row.split('\t')
+    return `<tr><td style="border:1px solid #ddd;padding:4px 10px">${esc(name)}</td><td style="border:1px solid #ddd;padding:4px 10px">${esc(dir)}</td></tr>`
+  })
+  const htmlTable = `<table style="border-collapse:collapse">
+${htmlRows.join('\n')}
+</table>`
+
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob([htmlTable], { type: 'text/html' }),
+        'text/plain': new Blob([tsv], { type: 'text/plain' }),
+      })
+    ])
+    console.log(`[export] Copied ${fileNotes.length} file entries to clipboard`)
+    showToast("Copied file table to clipboard")
+  } catch (e) {
+    console.error('Clipboard write failed:', e)
   }
 }
 
@@ -1398,6 +1486,30 @@ onUnmounted(() => {
 
 .canvas-container.is-linking .note-outer {
   cursor: pointer;
+}
+
+.canvas-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--controls-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  box-shadow: var(--shadow-menu);
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.toast-fade-enter-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.toast-fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 
 .linking-mode-banner {
