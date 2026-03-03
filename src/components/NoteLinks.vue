@@ -83,28 +83,27 @@ function removeLink(linkId: string) {
 
 .note-links-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .note-link-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  font-size: 0.65em;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.85em;
   cursor: pointer;
   user-select: none;
-  background: color-mix(in srgb, var(--chip-color) 30%, transparent);
-  border: 1px solid color-mix(in srgb, var(--chip-color) 45%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chip-color) 35%, transparent);
   color: var(--text-secondary);
   transition: background 0.15s;
-  max-width: 120px;
 }
 
 .note-link-chip:hover {
-  background: color-mix(in srgb, var(--chip-color) 45%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 35%, transparent);
 }
 
 .link-chip-title {
