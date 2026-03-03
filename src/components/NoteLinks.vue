@@ -91,7 +91,7 @@ function removeLink(linkId: string) {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px 4px 14px;
+  padding: 4px 10px 4px 38px;
   border-radius: 4px;
   font-size: 0.85em;
   cursor: pointer;
@@ -110,9 +110,9 @@ function removeLink(linkId: string) {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 10px;
+  width: 36px;
   background: var(--chip-color);
-  clip-path: polygon(0 0, 60% 0, 100% 50%, 60% 100%, 0 100%);
+  clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%);
 }
 
 .note-link-chip:hover {
