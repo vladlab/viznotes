@@ -96,14 +96,28 @@ function removeLink(linkId: string) {
   font-size: 0.85em;
   cursor: pointer;
   user-select: none;
-  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
-  border: 1.5px dashed color-mix(in srgb, var(--chip-color) 55%, transparent);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 3px,
+      color-mix(in srgb, var(--chip-color) 12%, transparent) 3px,
+      color-mix(in srgb, var(--chip-color) 12%, transparent) 6px
+    );
+  border: 1.5px dashed color-mix(in srgb, var(--chip-color) 85%, transparent);
   color: var(--text-secondary);
   transition: background 0.15s;
 }
 
 .note-link-chip:hover {
-  background: color-mix(in srgb, var(--chip-color) 35%, transparent);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 3px,
+      color-mix(in srgb, var(--chip-color) 22%, transparent) 3px,
+      color-mix(in srgb, var(--chip-color) 22%, transparent) 6px
+    );
 }
 
 .link-chip-title {
