@@ -135,7 +135,7 @@
     </div>
 
     <!-- File drop zone overlay -->
-    <div v-if="fileDropActive" class="file-drop-overlay">
+    <div v-if="fileDropActive && !fileReplaceTargetId" class="file-drop-overlay">
       <div class="file-drop-message">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -181,6 +181,7 @@ import ArrowLayer from './ArrowLayer.vue'
 const containerRef = ref<HTMLElement | null>(null)
 const spaceHeld = ref(false)
 const fileDropActive = ref(false)
+const fileReplaceTargetId = ref<string | null>(null)
 
 // Canvas context menu
 const canvasMenuVisible = ref(false)
@@ -991,10 +992,32 @@ onMounted(async () => {
     unlistenDragDrop = await webview.onDragDropEvent((event) => {
       if (event.payload.type === 'enter' || event.payload.type === 'over') {
         fileDropActive.value = true
-        lastDragClientX = event.payload.position.x / window.devicePixelRatio
-        lastDragClientY = event.payload.position.y / window.devicePixelRatio
+        const cx = event.payload.position.x / window.devicePixelRatio
+        const cy = event.payload.position.y / window.devicePixelRatio
+        lastDragClientX = cx
+        lastDragClientY = cy
+
+        // Check if hovering over a file note for replacement
+        const target = findFileNoteAtPoint(cx, cy)
+        const newId = target?.id || null
+        if (newId !== fileReplaceTargetId.value) {
+          // Remove highlight from previous target
+          if (fileReplaceTargetId.value) {
+            document.getElementById(`note-${fileReplaceTargetId.value}`)?.classList.remove('file-replace-target')
+          }
+          fileReplaceTargetId.value = newId
+          // Add highlight to new target
+          if (newId) {
+            document.getElementById(`note-${newId}`)?.classList.add('file-replace-target')
+          }
+        }
       } else if (event.payload.type === 'drop') {
         fileDropActive.value = false
+        // Clear replace highlight
+        if (fileReplaceTargetId.value) {
+          document.getElementById(`note-${fileReplaceTargetId.value}`)?.classList.remove('file-replace-target')
+          fileReplaceTargetId.value = null
+        }
         const paths = event.payload.paths
         const dropX = event.payload.position.x / window.devicePixelRatio
         const dropY = event.payload.position.y / window.devicePixelRatio
@@ -1015,6 +1038,10 @@ onMounted(async () => {
         createNotesFromDrop(dropX, dropY, names, paths, [])
       } else if (event.payload.type === 'leave') {
         fileDropActive.value = false
+        if (fileReplaceTargetId.value) {
+          document.getElementById(`note-${fileReplaceTargetId.value}`)?.classList.remove('file-replace-target')
+          fileReplaceTargetId.value = null
+        }
       }
     })
   } catch (e) {
@@ -1264,5 +1291,11 @@ onUnmounted(() => {
   background: rgba(26, 26, 26, 0.9);
   border-radius: 12px;
   border: 1px solid var(--accent);
+}
+
+.note-outer.file-replace-target {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 16px rgba(33, 150, 243, 0.4) !important;
 }
 </style>
