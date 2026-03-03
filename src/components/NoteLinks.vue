@@ -96,8 +96,8 @@ function removeLink(linkId: string) {
   font-size: 0.85em;
   cursor: pointer;
   user-select: none;
-  background: color-mix(in srgb, var(--chip-color) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--chip-color) 35%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+  border: 1.5px dashed color-mix(in srgb, var(--chip-color) 55%, transparent);
   color: var(--text-secondary);
   transition: background 0.15s;
 }
