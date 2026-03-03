@@ -739,6 +739,85 @@ function fileEmoji(filename: string): string {
   return FILE_EMOJI_MAP[ext] || '📎'
 }
 
+/**
+ * Hit-test the drop position against existing file-linked notes.
+ * Returns the Note if found, null otherwise.
+ */
+function findFileNoteAtPoint(clientX: number, clientY: number) {
+  const elements = document.elementsFromPoint(clientX, clientY)
+  for (const el of elements) {
+    const noteEl = el.closest('[id^="note-"]') as HTMLElement | null
+    if (!noteEl) continue
+    const noteId = noteEl.id.replace('note-', '')
+    const note = appStore.notes.get(noteId)
+    if (note?.link && !note.link.startsWith('page:')) {
+      return note
+    }
+  }
+  return null
+}
+
+/**
+ * Replace an existing file note's link with a new file.
+ * Shows confirmation dialog, preserves body/links/arrows, appends previous file info.
+ */
+async function handleFileReplacement(note: any, newName: string, newPath: string) {
+  try {
+    const { ask } = await import('@tauri-apps/plugin-dialog')
+
+    // Get old filename from path
+    const oldPath = note.link || ''
+    const oldParts = oldPath.replace(/\\/g, '/').split('/')
+    const oldName = oldParts[oldParts.length - 1] || oldPath
+
+    const confirmed = await ask(
+      `Update file reference?\n\n"${oldName}"\n→ "${newName}"`,
+      { title: 'Replace file', kind: 'info', okLabel: 'Replace', cancelLabel: 'Cancel' }
+    )
+    if (!confirmed) return
+
+    const before = history.snapshotNote(appStore.notes, note.id)!
+
+    // Build new head content
+    const displayName = `${fileEmoji(newName)} ${newName}`
+    let dirPath = newPath
+    const lastSlash = Math.max(newPath.lastIndexOf('/'), newPath.lastIndexOf('\\'))
+    if (lastSlash > 0) dirPath = newPath.substring(0, lastSlash)
+
+    const headParagraphs: any[] = [
+      { type: 'paragraph', content: [{ type: 'text', marks: [{ type: 'bold' }], text: displayName }] },
+    ]
+    if (dirPath) {
+      headParagraphs.push(
+        { type: 'paragraph', content: [{ type: 'text', text: dirPath }] },
+      )
+    }
+
+    // Append previous file info to body
+    const bodyBlocks = note.body.content?.content || []
+    bodyBlocks.push({ type: 'paragraph', content: [] })
+    bodyBlocks.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: `Previously: ${oldName}`, marks: [{ type: 'italic' }] }],
+    })
+    bodyBlocks.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: oldPath }],
+    })
+
+    // Update note
+    note.head.content = { type: 'doc', content: headParagraphs }
+    note.link = newPath
+    note.body.enabled = true
+    note.body.content = { type: 'doc', content: bodyBlocks }
+
+    appStore.updateNote(note)
+    appStore.pushNotePropertyAction(note.id, before, 'Replace file')
+  } catch (e) {
+    console.error('File replacement failed:', e)
+  }
+}
+
 async function createNotesFromDrop(
   clientX: number, clientY: number,
   names: string[], fullPaths: string[] | null,
@@ -923,6 +1002,16 @@ onMounted(async () => {
           const parts = p.replace(/\\/g, '/').split('/')
           return parts[parts.length - 1] || p
         })
+
+        // Single file dropped on an existing file note → offer replacement
+        if (paths.length === 1) {
+          const targetNote = findFileNoteAtPoint(dropX, dropY)
+          if (targetNote) {
+            handleFileReplacement(targetNote, names[0], paths[0])
+            return
+          }
+        }
+
         createNotesFromDrop(dropX, dropY, names, paths, [])
       } else if (event.payload.type === 'leave') {
         fileDropActive.value = false
