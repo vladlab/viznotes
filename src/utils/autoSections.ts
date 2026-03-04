@@ -51,6 +51,31 @@ function findSectionRange(blocks: any[], key: string): [number, number] | null {
   return null
 }
 
+/** Get the content blocks of a named section (excluding the marker).
+ *  Returns a mutable reference into the autoBody blocks array. */
+export function getSectionBlocks(note: Note, key: string): any[] | null {
+  const blocks = note.autoBody?.content?.content
+  if (!blocks) return null
+  const range = findSectionRange(blocks, key)
+  if (!range) return null
+  // Return slice after the marker (range[0]) up to end
+  return blocks.slice(range[0] + 1, range[1])
+}
+
+/** Replace only the content blocks of a named section (keeps the marker). */
+export function setSectionBlocks(note: Note, key: string, contentBlocks: any[]) {
+  ensureAutoBody(note)
+  const blocks = note.autoBody.content?.content ?? []
+  const range = findSectionRange(blocks, key)
+  if (range) {
+    // Replace everything after marker up to end of section
+    blocks.splice(range[0] + 1, range[1] - range[0] - 1, ...contentBlocks)
+  } else {
+    blocks.push(markerBlock(key), ...contentBlocks)
+  }
+  note.autoBody.content = { type: 'doc', content: blocks }
+}
+
 /** Replace an entire named section (creates it if missing). */
 export function replaceAutoSection(note: Note, key: string, contentBlocks: any[]) {
   ensureAutoBody(note)

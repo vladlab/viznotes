@@ -239,7 +239,7 @@ import { computed, ref, inject, onBeforeUnmount, nextTick } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import type { Note } from '../types/note'
-import { replaceAutoSection, appendAutoSection } from '../utils/autoSections'
+import { replaceAutoSection, appendAutoSection, getSectionBlocks, setSectionBlocks } from '../utils/autoSections'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { getStorage } from '../stores/state'
@@ -953,16 +953,13 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
       const waveformColor = '#0b7285'
       const total = audioStreams.length
 
-      // Insert progress status paragraph
+      // Insert progress status into Analysis section
       const current0 = appStore.notes.get(noteId)
       if (current0) {
-        const blocks = current0.autoBody.content?.content || []
-        blocks.push({
+        appendAutoSection(current0, 'Analysis', [{
           type: 'paragraph',
-          attrs: {},
           content: [{ type: 'text', text: `⏳ Generating waveforms (0/${total})…` }],
-        })
-        current0.autoBody.content = { type: 'doc', content: [...blocks] }
+        }])
         appStore.updateNote(current0)
       }
 
@@ -993,36 +990,36 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
               color: waveformColor,
             })
 
-            // Update progress and append waveform
+            // Update progress and append waveform within Analysis section
             const current = appStore.notes.get(noteId)
             if (!current) break
-            const blocks = current.autoBody.content?.content || []
+            const sectionBlocks = getSectionBlocks(current, 'Analysis') || []
 
             // Find and update the progress paragraph
-            const progressIdx = blocks.findIndex((b: any) =>
+            const progressIdx = sectionBlocks.findIndex((b: any) =>
               b.content?.[0]?.text?.startsWith('⏳ Generating waveforms')
             )
             if (progressIdx >= 0) {
               if (i < total - 1) {
-                blocks[progressIdx] = {
+                sectionBlocks[progressIdx] = {
                   type: 'paragraph',
                   content: [{ type: 'text', text: `⏳ Generating waveforms (${i + 1}/${total})…` }],
                 }
               } else {
                 // Last one — remove progress line
-                blocks.splice(progressIdx, 1)
+                sectionBlocks.splice(progressIdx, 1)
               }
             }
 
-            blocks.push({
+            sectionBlocks.push({
               type: 'paragraph',
               content: [{ type: 'text', text: `🔊 ${label}`, marks: [{ type: 'bold' }] }],
             })
-            blocks.push({
+            sectionBlocks.push({
               type: 'image',
               attrs: { src: filename },
             })
-            current.autoBody.content = { type: 'doc', content: [...blocks] }
+            setSectionBlocks(current, 'Analysis', sectionBlocks)
             appStore.updateNote(current)
           } catch (e) {
             console.warn(`[waveform] Failed for track ${i}:`, e)
@@ -1032,13 +1029,13 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
         // Clean up progress line if still present (e.g. all failed)
         const final_ = appStore.notes.get(noteId)
         if (final_) {
-          const blocks = final_.autoBody.content?.content || []
-          const idx = blocks.findIndex((b: any) =>
+          const sectionBlocks = getSectionBlocks(final_, 'Analysis') || []
+          const idx = sectionBlocks.findIndex((b: any) =>
             b.content?.[0]?.text?.startsWith('⏳ Generating waveforms')
           )
           if (idx >= 0) {
-            blocks.splice(idx, 1)
-            final_.autoBody.content = { type: 'doc', content: [...blocks] }
+            sectionBlocks.splice(idx, 1)
+            setSectionBlocks(final_, 'Analysis', sectionBlocks)
             appStore.updateNote(final_)
           }
         }
