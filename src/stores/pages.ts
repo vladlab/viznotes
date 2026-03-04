@@ -1,6 +1,6 @@
 /**
  * Page CRUD, navigation, and import/export operations.
- * Imports from state.ts and history.ts only.
+ * Supports split-view: multiple pages can be loaded simultaneously.
  */
 
 import { toRaw } from 'vue'
@@ -13,7 +13,7 @@ import {
   notes,
   arrows,
   links,
-  currentPageId,
+  loadedPages,
   currentPage,
   pageList,
   pageHistory,
@@ -24,7 +24,16 @@ import {
   flushPendingSaves,
   getStorage,
   rebuildParentMap,
+  loadPageData,
+  unloadPageData,
 } from './state'
+import {
+  activePane,
+  activePaneId,
+  panes,
+  paneCountForPage,
+  setPanePage,
+} from './panes'
 
 // ── Page management ──
 
@@ -33,49 +42,57 @@ export async function loadPageList() {
   pageList.value = await storage.listPages()
 }
 
-export async function loadPage(pageId: string) {
+/**
+ * Load a page into the active pane.
+ * Additive: other pane's data stays in shared Maps.
+ */
+export async function loadPage(pageId: string, targetPaneId?: string) {
   const storage = getStorage()
+  const paneId = targetPaneId ?? activePaneId.value
+  if (!paneId) return
 
-  // Flush any pending saves from the current page before switching
+  const pane = panes.get(paneId)
+  if (!pane) return
+
+  // Flush any pending saves before switching
   await flushPendingSaves()
 
   loading.value = true
   editingNoteId.value = null
   setEditStartSnapshot(null)
   selectedNoteIds.clear()
-  history.clear()
 
   try {
-    const page = await storage.getPage(pageId)
-    if (!page) return
-
-    const pageNotes = await storage.getNotesForPage(pageId)
-    const pageArrows = await storage.getArrowsForPage(pageId)
-    const pageLinks = await storage.getLinksForPage(pageId)
-    notes.clear()
-    arrows.clear()
-    links.clear()
-    for (const note of pageNotes) {
-      notes.set(note.id, note)
-    }
-    for (const arrow of pageArrows) {
-      arrows.set(arrow.id, arrow)
-    }
-    for (const link of pageLinks) {
-      links.set(link.id, link)
+    // If this pane had a different page, unload it (if no other pane uses it)
+    const oldPageId = setPanePage(paneId, pageId)
+    if (oldPageId && oldPageId !== pageId && paneCountForPage(oldPageId) === 0) {
+      unloadPageData(oldPageId)
+      // Purge undo history for the old page since it's no longer open
+      history.purgePageActions(oldPageId)
     }
 
-    currentPage.value = page
-    currentPageId.value = pageId
-    rebuildParentMap()
+    // If this page is already loaded (another pane has it), just point to it
+    if (loadedPages.has(pageId)) {
+      rebuildParentMap()
+    } else {
+      // Load fresh from storage
+      const page = await storage.getPage(pageId)
+      if (!page) return
 
-    // Compact z-indexes: renumber to sequential 1,2,3… preserving order
-    const sorted = [...notes.values()].sort((a, b) => a.zIndex - b.zIndex)
-    for (let i = 0; i < sorted.length; i++) {
-      sorted[i].zIndex = i + 1
-    }
-    if (currentPage.value) {
-      currentPage.value.nextZIndex = sorted.length + 1
+      const pageNotes = await storage.getNotesForPage(pageId)
+      const pageArrows = await storage.getArrowsForPage(pageId)
+      const pageLinks = await storage.getLinksForPage(pageId)
+
+      loadPageData(page, pageNotes, pageArrows, pageLinks)
+
+      // Compact z-indexes for this page's notes
+      const sorted = pageNotes.sort((a, b) => a.zIndex - b.zIndex)
+      for (let i = 0; i < sorted.length; i++) {
+        sorted[i].zIndex = i + 1
+      }
+      if (page) {
+        page.nextZIndex = sorted.length + 1
+      }
     }
   } finally {
     loading.value = false
@@ -90,8 +107,8 @@ export async function createPage(title: string = 'Untitled'): Promise<Page> {
 }
 
 export async function navigateToPage(pageId: string, pushHistory = true) {
-  if (pushHistory && currentPageId.value) {
-    pageHistory.value.push(currentPageId.value)
+  if (pushHistory && currentPage.value) {
+    pageHistory.value.push(currentPage.value.id)
   } else if (!pushHistory) {
     pageHistory.value = []
   }
@@ -105,12 +122,14 @@ export async function navigateBack() {
 
 export async function deletePage(pageId: string) {
   const storage = getStorage()
-  const wasCurrent = currentPageId.value === pageId
+
+  // Check if this page is open in any pane
+  const isLoaded = loadedPages.has(pageId)
 
   // Clean up note links pointing to this page across ALL pages
   const allPages = await storage.listPages()
   for (const pageSummary of allPages) {
-    if (pageSummary.id === pageId) continue  // skip the page being deleted
+    if (pageSummary.id === pageId) continue
     const pageNotes = await storage.getNotesForPage(pageSummary.id)
     const dirtyNotes: Note[] = []
     for (const note of pageNotes) {
@@ -137,34 +156,42 @@ export async function deletePage(pageId: string) {
   // Remove from page history
   pageHistory.value = pageHistory.value.filter(id => id !== pageId)
 
+  // If loaded, unload data and redirect any panes that had it
+  if (isLoaded) {
+    unloadPageData(pageId)
+    history.purgePageActions(pageId)
+  }
+
   await storage.deletePage(pageId)
   await loadPageList()
-  if (wasCurrent) {
-    // Navigate to another page if available
-    if (pageList.value.length > 0) {
-      await navigateToPage(pageList.value[0].id, false)
-    } else {
-      currentPage.value = null
-      currentPageId.value = null
-      notes.clear()
-      arrows.clear()
-      links.clear()
-      history.clear()
+
+  // Redirect any panes that were showing this page
+  for (const pane of panes.values()) {
+    if (pane.pageId === pageId) {
+      if (pageList.value.length > 0) {
+        await loadPage(pageList.value[0].id, pane.id)
+      } else {
+        setPanePage(pane.id, '')
+      }
     }
   }
 }
 
 export async function renamePage(pageId: string, title: string) {
   const storage = getStorage()
-  const page = await storage.getPage(pageId)
-  if (page) {
-    page.title = title
-    await storage.savePage(page)
-    await loadPageList()
-    if (currentPage.value?.id === pageId) {
-      currentPage.value.title = title
+  // Check if page is loaded in memory first
+  const loadedPage = loadedPages.get(pageId)
+  if (loadedPage) {
+    loadedPage.title = title
+    await storage.savePage(loadedPage)
+  } else {
+    const page = await storage.getPage(pageId)
+    if (page) {
+      page.title = title
+      await storage.savePage(page)
     }
   }
+  await loadPageList()
 }
 
 export async function exportData() {
@@ -176,5 +203,7 @@ export async function importData(data: { pages: Page[]; notes: Note[]; arrows: A
   const storage = getStorage()
   await storage.importAll(data)
   await loadPageList()
-  if (currentPageId.value) await loadPage(currentPageId.value)
+  // Reload the active pane's page
+  const pane = activePane.value
+  if (pane?.pageId) await loadPage(pane.pageId)
 }

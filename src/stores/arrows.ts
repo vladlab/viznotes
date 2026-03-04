@@ -42,6 +42,7 @@ export async function createArrow(
   // Undo
   history.pushAction({
     description: 'Create arrow',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: {},
     notesAfter: {},
     arrowsBefore: { [saved.id]: null },
@@ -82,6 +83,7 @@ export async function deleteArrow(arrowId: string) {
 
   history.pushAction({
     description: 'Delete arrow',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: {},
     notesAfter: {},
     arrowsBefore: { [arrowId]: deepClone(arrow) },
@@ -117,6 +119,7 @@ export async function deleteSelectedArrows() {
 
   history.pushAction({
     description: 'Delete arrows',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: {},
     notesAfter: {},
     arrowsBefore,

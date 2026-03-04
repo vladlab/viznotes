@@ -8,6 +8,7 @@ import type { Note } from '../types/note'
 import { history } from './history'
 import {
   notes,
+  currentPage,
   selectedNoteIds,
   selectedArrowIds,
   editingNoteId,
@@ -59,12 +60,10 @@ export function isSelected(noteId: string): boolean {
 // ── Editing ──
 
 export function setEditingNote(noteId: string) {
-  // If switching from another note, finalize that edit first
   if (editingNoteId.value && editingNoteId.value !== noteId) {
     finalizeEdit()
   }
 
-  // Snapshot the note before editing starts
   setEditStartSnapshot(history.snapshotNote(notes, noteId))
   editingNoteId.value = noteId
 
@@ -101,6 +100,7 @@ function finalizeEdit() {
   if (beforeJson !== afterJson) {
     history.pushAction({
       description: 'Edit note',
+      pageId: currentNote.pageId,
       notesBefore: { [noteId]: history.diffNote(currentNote as Note, editStartSnapshot as Note) },
       notesAfter: { [noteId]: history.diffNote(editStartSnapshot as Note, currentNote as Note) },
       rootIdsBefore: null,

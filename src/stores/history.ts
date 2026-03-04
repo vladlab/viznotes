@@ -16,6 +16,7 @@ interface LinkSnapshot { [linkId: string]: Link | null }
 
 interface UndoAction {
   description: string
+  pageId: string  // which page this action belongs to
   notesBefore: NoteSnapshot
   notesAfter: NoteSnapshot
   arrowsBefore: ArrowSnapshot
@@ -90,6 +91,12 @@ function clear() {
   redoStack.value = []
 }
 
+/** Remove all undo/redo actions for a specific page (called when page is unloaded) */
+function purgePageActions(pageId: string) {
+  undoStack.value = undoStack.value.filter(a => a.pageId !== pageId)
+  redoStack.value = redoStack.value.filter(a => a.pageId !== pageId)
+}
+
 // ── Snapshot helpers ──
 
 function snapshotNote(notes: Map<string, Note>, id: string): Note | null {
@@ -115,7 +122,7 @@ function snapshotArrows(arrows: Map<string, Arrow>, ids: string[]): ArrowSnapsho
 }
 
 function collectDescendantIds(notes: Map<string, Note>, rootId: string, visited = new Set<string>()): string[] {
-  if (visited.has(rootId)) return []  // Cycle protection
+  if (visited.has(rootId)) return []
   visited.add(rootId)
   const result: string[] = [rootId]
   const note = notes.get(rootId)
@@ -129,15 +136,6 @@ function collectDescendantIds(notes: Map<string, Note>, rootId: string, visited 
 
 // ── Diff system ──
 
-/**
- * Compute a property-level diff between two Note snapshots.
- * Returns only the top-level properties of `to` that differ from `from`,
- * as deep-cloned values. Skips identity and timestamp fields.
- *
- * A move operation that changes only pos will return:
- *   { pos: { x: 50, y: 60 } }
- * instead of a full ~30-field Note clone.
- */
 function diffNote(from: Note, to: Note): Partial<Note> {
   const diff: any = {}
   for (const key of Object.keys(to)) {
@@ -151,13 +149,6 @@ function diffNote(from: Note, to: Note): Partial<Note> {
   return diff
 }
 
-/**
- * Take full before/after snapshot maps and optimize them:
- * - Create/delete entries (one side null): kept as full snapshots
- * - Mutation entries (both sides non-null): replaced with property-level diffs
- *
- * Returns optimized maps ready for pushAction().
- */
 function optimizeSnapshots(
   beforeSnaps: Record<string, Note | null>,
   afterSnaps: Record<string, Note | null>,
@@ -171,11 +162,9 @@ function optimizeSnapshots(
     const a = afterSnaps[id] ?? null
 
     if (b !== null && a !== null) {
-      // Both exist → mutation → property-level diff
       notesBefore[id] = diffNote(a, b)
       notesAfter[id] = diffNote(b, a)
     } else {
-      // One side null → create or delete → keep full snapshot
       notesBefore[id] = b
       notesAfter[id] = a
     }
@@ -184,15 +173,11 @@ function optimizeSnapshots(
   return { notesBefore, notesAfter }
 }
 
-/**
- * Check if a snapshot has enough fields to fully restore a note.
- * Used by applySnapshot to distinguish full restores from partial diffs.
- */
 function isFullNote(snapshot: Partial<Note>): snapshot is Note {
   return 'id' in snapshot && 'pageId' in snapshot && 'head' in snapshot && 'body' in snapshot
 }
 
-export type { UndoAction }
+export type { UndoAction, UndoActionInput }
 
 export const history = {
   undoStack,
@@ -203,6 +188,7 @@ export const history = {
   undo,
   redo,
   clear,
+  purgePageActions,
   snapshotNote,
   snapshotNotes,
   snapshotArrow,

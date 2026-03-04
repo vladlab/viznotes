@@ -137,6 +137,7 @@ export async function generateWeek(
 
   history.pushAction({
     description: 'Generate week view',
+    pageId: currentPage.value?.id ?? '',
     notesBefore,
     notesAfter,
     rootIdsBefore,

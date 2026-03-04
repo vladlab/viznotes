@@ -179,11 +179,29 @@ import type { Note } from '../types/note'
 import type { ResizeHandle } from '../composables/useResize'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
-import { getStorage } from '../stores/state'
+import { appendAutoSection, replaceAutoSection } from '../utils/autoSections'
+import { getStorage, loadedPages, getRootNotesForPage, clearArrowRecompute } from '../stores/state'
+import { panes, setActivePane } from '../stores/panes'
 import { settings } from '../stores/settings'
 import { loadUserTheme } from '../utils/themeLoader'
 import NoteComponent from './NoteComponent.vue'
 import ArrowLayer from './ArrowLayer.vue'
+
+const props = defineProps<{
+  paneId: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'activate'): void
+}>()
+
+// Pane-specific computed
+const paneContext = computed(() => panes.get(props.paneId))
+const panePageId = computed(() => paneContext.value?.pageId ?? null)
+const panePage = computed(() => {
+  const id = panePageId.value
+  return id ? loadedPages.get(id) ?? null : null
+})
 
 const containerRef = ref<HTMLElement | null>(null)
 const spaceHeld = ref(false)
@@ -230,6 +248,48 @@ function getSelectedNoteRects() {
   return results
 }
 
+/** Toggle collapse on all selected notes (Tab shortcut).
+ *  Uses same cycle as master toggle: mixed → all folded → all unfolded. */
+function toggleCollapseSelected() {
+  const selectedIds = Array.from(appStore.selectedNoteIds)
+  const selectedNotes = selectedIds
+    .map(id => appStore.notes.get(id))
+    .filter((n): n is Note => n !== undefined)
+  if (selectedNotes.length === 0) return
+
+  // Check aggregate state: are all fully collapsed?
+  const allCollapsed = selectedNotes.every(n => n.collapsed)
+
+  for (const note of selectedNotes) {
+    if (!note.foldState) {
+      note.foldState = { autoBody: false, body: false, container: false, links: false }
+    }
+    const before = history.snapshotNote(appStore.notes, note.id)!
+
+    // Determine which sections are present on this note
+    const present: ('autoBody' | 'body' | 'container' | 'links')[] = []
+    if (note.autoBody?.enabled) present.push('autoBody')
+    if (note.body.enabled) present.push('body')
+    if (note.container.enabled && note.container.childIds.length > 0) present.push('container')
+    if (appStore.getLinksForNote(note.id).length > 0) present.push('links')
+
+    if (present.length === 0) {
+      note.collapsed = !allCollapsed ? true : false
+    } else if (allCollapsed) {
+      // All collapsed → unfold all
+      for (const s of present) note.foldState[s] = false
+      note.collapsed = false
+    } else {
+      // Mixed or all unfolded → fold all
+      for (const s of present) note.foldState[s] = true
+      note.collapsed = true
+    }
+
+    appStore.updateNote(note)
+    appStore.pushNotePropertyAction(note.id, before, 'Toggle collapse')
+  }
+}
+
 function centerOnSelection() {
   const items = getSelectedNoteRects()
   if (items.length === 0) return
@@ -269,9 +329,9 @@ function centerOnSelection() {
 
 function fitAllNotes() {
   const positions: Array<{ x: number; y: number; w: number; h: number }> = []
-  if (!appStore.currentPage.value) return
+  if (!panePage.value) return
 
-  for (const id of appStore.currentPage.value.rootNoteIds) {
+  for (const id of panePage.value.rootNoteIds) {
     const note = appStore.notes.get(id)
     if (!note) continue
     const el = document.getElementById(`note-${id}`) as HTMLElement | null
@@ -326,6 +386,7 @@ function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'ce
   const optimized = history.optimizeSnapshots(notesBefore, notesAfter)
   history.pushAction({
     description: `Align notes (${mode})`,
+    pageId: panePageId.value ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     rootIdsBefore: null,
@@ -376,6 +437,7 @@ function distributeNotes(axis: 'horizontal' | 'vertical') {
   const optimized = history.optimizeSnapshots(notesBefore, notesAfter)
   history.pushAction({
     description: `Distribute notes (${axis})`,
+    pageId: panePageId.value ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     rootIdsBefore: null,
@@ -393,14 +455,26 @@ const resize = useResize(() => canvas.transform)
 const boxSelection = useBoxSelection()
 
 // Provide drag/resize and drag state to child notes
+provide('paneId', props.paneId)
+provide('panePage', panePage)
+provide('activatePane', activatePane)
 provide('startDrag', drag.startDrag)
 provide('startResize', resize.startResize)
 provide('isDragging', drag.isDragging)
 provide('dragTargetId', drag.dragTargetId)
 provide('dropTargetId', drag.dropTargetId)
 
-const rootNotes = computed(() => appStore.rootNotes.value)
+const rootNotes = computed(() => {
+  const pid = panePageId.value
+  if (!pid) return []
+  return getRootNotesForPage(pid)
+})
 const zoomPercent = computed(() => Math.round(canvas.transform.scale * 100))
+
+function activatePane() {
+  setActivePane(props.paneId)
+  emit('activate')
+}
 
 const gridStyle = computed(() => {
   const s = canvas.transform.scale
@@ -425,6 +499,7 @@ function isCanvasBackground(target: HTMLElement): boolean {
 }
 
 function onCanvasPointerDown(e: PointerEvent) {
+  activatePane()
   // Kill any stuck drag/resize from a lost pointerup (e.g. compositor window move)
   if (drag.isDragging.value) {
     drag.cancelDrag()
@@ -578,6 +653,15 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Tab: toggle collapse/expand all selected notes
+  if (e.key === 'Tab' && !appStore.editingNoteId.value) {
+    e.preventDefault()
+    if (appStore.selectedNoteIds.size > 0) {
+      toggleCollapseSelected()
+    }
+    return
+  }
+
   const isCtrl = e.ctrlKey || e.metaKey
 
   // Undo/redo
@@ -614,7 +698,7 @@ function onKeyDown(e: KeyboardEvent) {
   // Paste
   if (isCtrl && e.key === 'v' && !appStore.editingNoteId.value) {
     e.preventDefault()
-    if (appStore.hasClipboard() && appStore.currentPage.value) {
+    if (appStore.hasClipboard() && panePage.value) {
       // Paste at center of current viewport
       const vw = containerWidth.value
       const vh = containerHeight.value
@@ -622,7 +706,7 @@ function onKeyDown(e: KeyboardEvent) {
         x: (-canvas.transform.x + vw / 2) / canvas.transform.scale,
         y: (-canvas.transform.y + vh / 2) / canvas.transform.scale,
       }
-      appStore.pasteNotes(appStore.currentPage.value.id, centerWorld).catch(console.error)
+      appStore.pasteNotes(panePage.value!.id, centerWorld).catch(console.error)
     }
     return
   }
@@ -693,8 +777,8 @@ function onKeyDown(e: KeyboardEvent) {
     case 'a':
       if (isCtrl) {
         e.preventDefault()
-        if (appStore.currentPage.value) {
-          for (const id of appStore.currentPage.value.rootNoteIds) {
+        if (panePage.value) {
+          for (const id of panePage.value.rootNoteIds) {
             appStore.selectedNoteIds.add(id)
           }
         }
@@ -843,39 +927,37 @@ async function handleFileReplacement(note: any, newName: string, newPath: string
 
     const before = history.snapshotNote(appStore.notes, note.id)!
 
-    // Build new head content
+    // Head: just the new filename
     const displayName = `${fileEmoji(newName)} ${newName}`
-    let dirPath = newPath
-    const lastSlash = Math.max(newPath.lastIndexOf('/'), newPath.lastIndexOf('\\'))
-    if (lastSlash > 0) dirPath = newPath.substring(0, lastSlash)
-
-    const headParagraphs: any[] = [
-      { type: 'paragraph', content: [{ type: 'text', marks: [{ type: 'bold' }], text: displayName }] },
-    ]
-    if (dirPath) {
-      headParagraphs.push(
-        { type: 'paragraph', content: [{ type: 'text', text: dirPath }] },
-      )
+    note.head.content = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', marks: [{ type: 'bold' }], text: displayName }] },
+      ],
     }
 
-    // Append previous file info to body
-    const bodyBlocks = note.body.content?.content || []
-    bodyBlocks.push({ type: 'paragraph', content: [] })
-    bodyBlocks.push({
-      type: 'paragraph',
-      content: [{ type: 'text', text: `Previously: ${oldName}`, marks: [{ type: 'italic' }] }],
-    })
-    bodyBlocks.push({
-      type: 'paragraph',
-      content: [{ type: 'text', text: oldPath }],
-    })
+    // Replace Path section with new path
+    replaceAutoSection(note, 'Path', [
+      { type: 'paragraph', content: [{ type: 'text', text: newPath }] },
+    ])
+
+    // Append old file to history
+    const now = new Date()
+    const timestamp = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`
+    appendAutoSection(note, 'File History', [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: `${timestamp} — ${oldName}`, marks: [{ type: 'italic' }] }],
+      },
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: oldPath }],
+      },
+    ])
 
     // Update note
-    note.head.content = { type: 'doc', content: headParagraphs }
     note.link = newPath
     note.fileSize = newBytes
-    note.body.enabled = true
-    note.body.content = { type: 'doc', content: bodyBlocks }
 
     appStore.updateNote(note)
     appStore.pushNotePropertyAction(note.id, before, 'Replace file')
@@ -1254,22 +1336,10 @@ async function createNotesFromDrop(
     const displayName = isFolder ? `📁 ${names[i]}` : `${fileEmoji(names[i])} ${names[i]}`
     const filePath = fullPaths?.[i] || ''
 
-    // Extract directory path (strip filename)
-    let dirPath = filePath
-    if (filePath && !isFolder) {
-      const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
-      if (lastSlash > 0) dirPath = filePath.substring(0, lastSlash)
-    }
-
-    // Build head content: filename + directory path on separate lines
+    // Head: just the filename
     const headParagraphs: any[] = [
       { type: 'paragraph', content: [{ type: 'text', marks: [{ type: 'bold' }], text: displayName }] },
     ]
-    if (dirPath) {
-      headParagraphs.push(
-        { type: 'paragraph', content: [{ type: 'text', text: dirPath }] },
-      )
-    }
 
     const note = await appStore.createNote(notePos, undefined, {
       headContent: { type: 'doc', content: headParagraphs },
@@ -1277,17 +1347,30 @@ async function createNotesFromDrop(
       link: filePath || undefined,
       nodeType: 'file',
       startEditing: false,
-      enableBody: true,
+      enableBody: false,
     })
+
+    // Get the reactive proxy from the Map (createNote returns the raw object,
+    // which won't trigger Vue re-renders when mutated)
+    const reactiveNote = appStore.notes.get(note.id) ?? note
+
+    // Path goes into Data section (starts folded)
+    if (filePath) {
+      replaceAutoSection(reactiveNote, 'Path', [
+        { type: 'paragraph', content: [{ type: 'text', text: filePath }] },
+      ])
+      reactiveNote.foldState.autoBody = true
+    }
 
     // Store file size
     if (filePath && !isFolder) {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
-        note.fileSize = await invoke<number>('get_file_size', { path: filePath })
+        reactiveNote.fileSize = await invoke<number>('get_file_size', { path: filePath })
       } catch {}
     }
 
+    appStore.updateNote(reactiveNote)
     createdNoteIds.push(note.id)
   }
 
@@ -1304,7 +1387,7 @@ let unlistenDragDrop: (() => void) | null = null
 const pageViewports = new Map<string, { x: number; y: number; scale: number }>()
 
 function saveCurrentViewport() {
-  const pageId = appStore.currentPageId.value
+  const pageId = panePageId.value
   if (pageId) {
     pageViewports.set(pageId, {
       x: canvas.transform.x,
@@ -1315,7 +1398,7 @@ function saveCurrentViewport() {
 }
 
 function restoreOrFitViewport() {
-  const pageId = appStore.currentPageId.value
+  const pageId = panePageId.value
   if (!pageId) return
 
   const saved = pageViewports.get(pageId)
@@ -1330,7 +1413,7 @@ function restoreOrFitViewport() {
 }
 
 // Save viewport before page switch, restore/fit after
-watch(() => appStore.currentPageId.value, (_newId, oldId) => {
+watch(() => panePageId.value, (_newId, oldId) => {
   if (oldId) {
     pageViewports.set(oldId, {
       x: canvas.transform.x,
@@ -1461,6 +1544,7 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   unlistenDragDrop?.()
   closeCanvasMenu()
+  clearArrowRecompute(props.paneId)
 })
 </script>
 

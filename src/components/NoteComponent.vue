@@ -4,7 +4,7 @@
     class="note-outer"
     :class="{
       collapsed: note.collapsed,
-      'collapsed-stack': note.collapsed && note.container.enabled && note.container.childIds.length > 0,
+      'collapsed-stack': (note.collapsed || note.foldState?.container) && note.container.enabled && note.container.childIds.length > 0,
       'in-list': !spatial,
       'is-selected': isSelected,
       'is-editing': isEditing,
@@ -88,14 +88,41 @@
       <!-- Sections -->
       <NoteTextSection :note="note" sectionName="head" />
 
-      <div v-if="note.head.enabled && (note.body.enabled || note.container.enabled) && !note.collapsed" class="note-divider" />
+      <!-- Auto body section -->
+      <div v-if="hasAutoBody" class="section-header" @click.stop="toggleSectionFold('autoBody')">
+        <svg class="section-chevron" :class="{ folded: isFolded('autoBody') }" width="10" height="10" viewBox="0 0 10 10">
+          <path d="M1 3 L5 7 L9 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="section-header-label">Data</span>
+      </div>
+      <NoteTextSection v-if="hasAutoBody && !isFolded('autoBody')" :note="note" sectionName="autoBody" />
 
-      <template v-if="!note.collapsed">
-        <NoteTextSection :note="note" sectionName="body" />
-        <div v-if="note.body.enabled && note.container.enabled" class="note-divider" />
-        <NoteContainer :note="note" :depth="depth" />
-      </template>
-      <NoteLinks :note="note" />
+      <!-- User body section -->
+      <div v-if="note.body.enabled" class="section-header" @click.stop="toggleSectionFold('body')">
+        <svg class="section-chevron" :class="{ folded: isFolded('body') }" width="10" height="10" viewBox="0 0 10 10">
+          <path d="M1 3 L5 7 L9 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="section-header-label">Notes</span>
+      </div>
+      <NoteTextSection v-if="note.body.enabled && !isFolded('body')" :note="note" sectionName="body" />
+
+      <!-- Container section -->
+      <div v-if="hasContainer" class="section-header" @click.stop="toggleSectionFold('container')">
+        <svg class="section-chevron" :class="{ folded: isFolded('container') }" width="10" height="10" viewBox="0 0 10 10">
+          <path d="M1 3 L5 7 L9 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="section-header-count">{{ containerChildCount }} item{{ containerChildCount !== 1 ? 's' : '' }}</span>
+      </div>
+      <NoteContainer v-if="!isFolded('container')" :note="note" :depth="depth" />
+
+      <!-- Links section -->
+      <div v-if="hasLinks" class="section-header" @click.stop="toggleSectionFold('links')">
+        <svg class="section-chevron" :class="{ folded: isFolded('links') }" width="10" height="10" viewBox="0 0 10 10">
+          <path d="M1 3 L5 7 L9 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="section-header-count">{{ noteLinks.length }} link{{ noteLinks.length !== 1 ? 's' : '' }}</span>
+      </div>
+      <NoteLinks v-if="!isFolded('links')" :note="note" />
     </div>
 
     <!-- Resize handles (spatial, selected, not editing) -->
@@ -211,9 +238,12 @@
 import { computed, ref, inject, onBeforeUnmount, nextTick } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
+import type { Note } from '../types/note'
+import { replaceAutoSection, appendAutoSection } from '../utils/autoSections'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { getStorage } from '../stores/state'
+import { panes, setActivePane } from '../stores/panes'
 import { nanoid } from 'nanoid'
 import NoteTextSection from './NoteTextSection.vue'
 import NoteContainer from './NoteContainer.vue'
@@ -235,6 +265,7 @@ const startDrag = inject<(note: Note, parentNoteId: string | undefined, e: Point
 const startResize = inject<(note: Note, handle: ResizeHandle, e: PointerEvent) => void>('startResize', () => {})
 const dragTargetId = inject<{ value: string | null }>('dragTargetId', ref(null))
 const dropTargetId = inject<{ value: string | null }>('dropTargetId', ref(null))
+const activatePane = inject<() => void>('activatePane', () => {})
 const isDraggingGlobal = inject<{ value: boolean }>('isDragging', ref(false))
 
 const isEditing = computed(() => appStore.editingNoteId.value === props.note.id)
@@ -251,10 +282,53 @@ const contextMenuRef = ref<HTMLElement | null>(null)
 const hasMultipleSections = computed(() => {
   let count = 0
   if (props.note.head.enabled) count++
+  if (props.note.autoBody?.enabled) count++
   if (props.note.body.enabled) count++
   if (props.note.container.enabled) count++
+  if (noteLinks.value.length > 0) count++
   return count > 1
 })
+
+// Per-section fold helpers
+const noteLinks = computed(() => appStore.getLinksForNote(props.note.id))
+const hasAutoBody = computed(() => {
+  const ab = props.note.autoBody
+  if (!ab) return false
+  const blocks = ab.content?.content
+  if (!blocks || blocks.length === 0) return false
+  // Show section if any block has actual text/image content
+  return blocks.some((b: any) => (b.content && b.content.length > 0) || b.type === 'image')
+})
+const hasContainer = computed(() => props.note.container.enabled && props.note.container.childIds.length > 0)
+const hasLinks = computed(() => noteLinks.value.length > 0)
+const containerChildCount = computed(() => props.note.container.childIds.length)
+
+function isFolded(section: 'autoBody' | 'body' | 'container' | 'links'): boolean {
+  return props.note.foldState?.[section] ?? false
+}
+
+/** Sections currently present on this note (for master toggle logic) */
+function presentSections(): ('autoBody' | 'body' | 'container' | 'links')[] {
+  const sections: ('autoBody' | 'body' | 'container' | 'links')[] = []
+  if (hasAutoBody.value) sections.push('autoBody')
+  if (props.note.body.enabled) sections.push('body')
+  if (hasContainer.value) sections.push('container')
+  if (hasLinks.value) sections.push('links')
+  return sections
+}
+
+function toggleSectionFold(section: 'autoBody' | 'body' | 'container' | 'links') {
+  if (!props.note.foldState) {
+    props.note.foldState = { autoBody: false, body: false, container: false, links: false }
+  }
+  const before = history.snapshotNote(appStore.notes, props.note.id)!
+  props.note.foldState[section] = !props.note.foldState[section]
+  // Sync master collapsed: true only if ALL present sections are folded
+  const present = presentSections()
+  props.note.collapsed = present.length > 0 && present.every(s => props.note.foldState[s])
+  appStore.updateNote(props.note)
+  appStore.pushNotePropertyAction(props.note.id, before, 'Toggle section fold')
+}
 
 const noteColor = computed(() => {
   if (props.note.color.inherit) return undefined
@@ -299,6 +373,7 @@ function onPointerDown(e: PointerEvent) {
   if (e.button === 1) return
 
   if (e.button !== 0) return
+  activatePane()
   e.stopPropagation()
 
   // Linking mode: clicking a note completes the link
@@ -343,9 +418,37 @@ function onResizeStart(handle: ResizeHandle, e: PointerEvent) {
   startResize(props.note, handle, e)
 }
 
+/** Unfold a specific section (and master collapsed flag) without creating undo action */
+function unfoldSection(section: 'autoBody' | 'body' | 'container' | 'links') {
+  if (!props.note.foldState) {
+    props.note.foldState = { autoBody: false, body: false, container: false, links: false }
+  }
+  props.note.foldState[section] = false
+  props.note.collapsed = false
+}
+
 function toggleCollapse() {
   const before = history.snapshotNote(appStore.notes, props.note.id)!
-  props.note.collapsed = !props.note.collapsed
+  if (!props.note.foldState) {
+    props.note.foldState = { autoBody: false, body: false, container: false, links: false }
+  }
+  const present = presentSections()
+  if (present.length === 0) {
+    // No foldable sections — just toggle the legacy boolean
+    props.note.collapsed = !props.note.collapsed
+  } else {
+    const allFolded = present.every(s => props.note.foldState[s])
+    const allUnfolded = present.every(s => !props.note.foldState[s])
+    if (allFolded) {
+      // All folded → unfold all
+      for (const s of present) props.note.foldState[s] = false
+      props.note.collapsed = false
+    } else {
+      // Mixed or all unfolded → fold all
+      for (const s of present) props.note.foldState[s] = true
+      props.note.collapsed = true
+    }
+  }
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, 'Toggle collapse')
 }
@@ -370,9 +473,11 @@ function addToContainer() {
   // Auto-expand if collapsed
   if (props.note.collapsed) {
     const before = history.snapshotNote(appStore.notes, props.note.id)!
+    const present = presentSections()
+    for (const s of present) unfoldSection(s)
     props.note.collapsed = false
     appStore.updateNote(props.note)
-    appStore.pushNotePropertyAction(props.note.id, before, 'Expand container')
+    appStore.pushNotePropertyAction(props.note.id, before, 'Expand note')
   }
 }
 
@@ -641,7 +746,21 @@ async function followLink() {
     // Page link — verify it still exists
     const page = appStore.pageList.value.find(p => p.id === props.note.link)
     if (page) {
-      appStore.navigateToPage(props.note.link)
+      // Check if the target page is already open in another pane
+      let targetPane = null
+      for (const pane of panes.values()) {
+        if (pane.pageId === props.note.link) {
+          targetPane = pane
+          break
+        }
+      }
+      if (targetPane) {
+        // Target page is open — activate that pane and focus
+        setActivePane(targetPane.id)
+      } else {
+        // Navigate in the active pane
+        appStore.navigateToPage(props.note.link)
+      }
     } else {
       // Dead link — clean it up
       const before = history.snapshotNote(appStore.notes, props.note.id)!
@@ -676,14 +795,11 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
     const exists: boolean = await invoke('path_exists', { path: props.note.link })
     if (!exists) {
       const before = history.snapshotNote(appStore.notes, props.note.id)!
-      props.note.body.enabled = true
-      props.note.collapsed = false
-      const existingBlocks = props.note.body.content?.content || []
-      existingBlocks.push({
+      replaceAutoSection(props.note, 'Analysis', [{
         type: 'paragraph',
         content: [{ type: 'text', text: '⚠ File not found — may have been moved or deleted' }],
-      })
-      props.note.body.content = { type: 'doc', content: existingBlocks }
+      }])
+      unfoldSection('autoBody')
       appStore.updateNote(props.note)
       appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
       analyzing.value = false
@@ -813,23 +929,16 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
       lines.push('No media streams found')
     }
 
-    // Show text analysis immediately
+    // Show text analysis — replaces previous analysis on re-run
     const before = history.snapshotNote(appStore.notes, props.note.id)!
 
-    props.note.body.enabled = true
-    props.note.collapsed = false
-
-    // Append to existing body content
-    const existingBlocks = props.note.body.content?.content || []
     const newBlocks: any[] = lines.map(line => ({
       type: 'paragraph',
       content: line ? [{ type: 'text', text: line }] : [],
     }))
 
-    props.note.body.content = {
-      type: 'doc',
-      content: [...existingBlocks, ...newBlocks],
-    }
+    replaceAutoSection(props.note, 'Analysis', newBlocks)
+    unfoldSection('autoBody')
 
     appStore.updateNote(props.note)
     appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
@@ -847,13 +956,13 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
       // Insert progress status paragraph
       const current0 = appStore.notes.get(noteId)
       if (current0) {
-        const blocks = current0.body.content?.content || []
+        const blocks = current0.autoBody.content?.content || []
         blocks.push({
           type: 'paragraph',
           attrs: {},
           content: [{ type: 'text', text: `⏳ Generating waveforms (0/${total})…` }],
         })
-        current0.body.content = { type: 'doc', content: [...blocks] }
+        current0.autoBody.content = { type: 'doc', content: [...blocks] }
         appStore.updateNote(current0)
       }
 
@@ -887,7 +996,7 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
             // Update progress and append waveform
             const current = appStore.notes.get(noteId)
             if (!current) break
-            const blocks = current.body.content?.content || []
+            const blocks = current.autoBody.content?.content || []
 
             // Find and update the progress paragraph
             const progressIdx = blocks.findIndex((b: any) =>
@@ -913,7 +1022,7 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
               type: 'image',
               attrs: { src: filename },
             })
-            current.body.content = { type: 'doc', content: [...blocks] }
+            current.autoBody.content = { type: 'doc', content: [...blocks] }
             appStore.updateNote(current)
           } catch (e) {
             console.warn(`[waveform] Failed for track ${i}:`, e)
@@ -923,13 +1032,13 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
         // Clean up progress line if still present (e.g. all failed)
         const final_ = appStore.notes.get(noteId)
         if (final_) {
-          const blocks = final_.body.content?.content || []
+          const blocks = final_.autoBody.content?.content || []
           const idx = blocks.findIndex((b: any) =>
             b.content?.[0]?.text?.startsWith('⏳ Generating waveforms')
           )
           if (idx >= 0) {
             blocks.splice(idx, 1)
-            final_.body.content = { type: 'doc', content: [...blocks] }
+            final_.autoBody.content = { type: 'doc', content: [...blocks] }
             appStore.updateNote(final_)
           }
         }
@@ -938,18 +1047,15 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
     return // skip the finally block's analyzing=false since we already set it
   } catch (e: any) {
     console.error('ffprobe failed:', e)
-    // Show error in the note body
+    // Show error in the note autoBody
     try {
       const before = history.snapshotNote(appStore.notes, props.note.id)!
-      props.note.body.enabled = true
-      props.note.collapsed = false
-      const existingBlocks = props.note.body.content?.content || []
       const msg = String(e).includes('ffprobe') ? '⚠ ffprobe not found — is FFmpeg installed?' : `⚠ Analysis failed: ${e}`
-      existingBlocks.push({
+      replaceAutoSection(props.note, 'Analysis', [{
         type: 'paragraph',
         content: [{ type: 'text', text: msg }],
-      })
-      props.note.body.content = { type: 'doc', content: existingBlocks }
+      }])
+      unfoldSection('autoBody')
       appStore.updateNote(props.note)
       appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
     } catch { /* ignore */ }
@@ -1182,6 +1288,46 @@ function extractPlainText(content: any): string {
   background: var(--note-border);
   margin: 0;
   flex-shrink: 0;
+}
+
+/* Section fold headers */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px solid var(--note-border);
+  opacity: 0.6;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+
+.section-header:hover {
+  opacity: 1;
+}
+
+.section-chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.section-chevron.folded {
+  transform: rotate(-90deg);
+}
+
+.section-header-label {
+  font-size: 0.65em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.section-header-count {
+  font-size: 0.7em;
+  color: var(--text-muted);
 }
 
 /* When collapse button visible, indent content so arrow doesn't overlap text */

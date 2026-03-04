@@ -143,6 +143,7 @@ export async function createNote(
 
   history.pushAction({
     description: 'Create note',
+    pageId: currentPage.value?.id ?? '',
     notesBefore,
     notesAfter,
     rootIdsBefore: parentNoteId ? null : rootIdsBefore,
@@ -188,6 +189,7 @@ export function pushMoveAction(movedNotes: Array<{ id: string; before: Note; aft
 
   history.pushAction({
     description: 'Move note' + (movedNotes.length > 1 ? 's' : ''),
+    pageId: movedNotes[0].after.pageId,
     notesBefore,
     notesAfter,
     rootIdsBefore: null,
@@ -203,6 +205,7 @@ export function pushMoveAction(movedNotes: Array<{ id: string; before: Note; aft
 export function pushResizeAction(noteId: string, before: Note, after: Note) {
   history.pushAction({
     description: 'Resize note',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: { [noteId]: history.diffNote(after, before) },
     notesAfter: { [noteId]: history.diffNote(before, after) },
     rootIdsBefore: null,
@@ -219,6 +222,7 @@ export function pushNotePropertyAction(noteId: string, before: Note, description
   const after = history.snapshotNote(notes, noteId)!
   history.pushAction({
     description,
+    pageId: before.pageId,
     notesBefore: { [noteId]: history.diffNote(after, before) },
     notesAfter: { [noteId]: history.diffNote(before, after) },
     rootIdsBefore: null,
@@ -321,6 +325,7 @@ export async function deleteNote(noteId: string, parentNoteId?: string) {
 
   history.pushAction({
     description: 'Delete note',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     arrowsBefore,
@@ -463,6 +468,7 @@ export async function deleteSelected() {
 
   history.pushAction({
     description: 'Delete notes',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     arrowsBefore: arrowsBefore,
@@ -542,6 +548,7 @@ export async function reparentNote(noteId: string, oldParentNoteId: string | und
 
   history.pushAction({
     description: 'Move note to container',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     rootIdsBefore: oldParentNoteId ? null : rootIdsBefore,
@@ -582,6 +589,7 @@ export async function unparentNote(noteId: string, parentNoteId: string, worldPo
 
   history.pushAction({
     description: 'Move note to canvas',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     rootIdsBefore,
@@ -623,6 +631,7 @@ export async function reorderNote(noteId: string, parentNoteId: string, newIndex
 
   history.pushAction({
     description: 'Reorder note in container',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: optimized.notesBefore,
     notesAfter: optimized.notesAfter,
     rootIdsBefore: null,

@@ -120,8 +120,9 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watchEffect, watch, toRaw, onMounted, onBeforeUnmount } from 'vue'
+import { reactive, ref, computed, watchEffect, watch, toRaw, onMounted, onBeforeUnmount, inject } from 'vue'
 import { appStore } from '../stores/app'
+import { panes } from '../stores/panes'
 import { history } from '../stores/history'
 import { settings } from '../stores/settings'
 import { themeReloadCount } from '../utils/themeLoader'
@@ -136,6 +137,7 @@ const props = defineProps<{
 }>()
 
 const selectedArrowIds = appStore.selectedArrowIds
+const paneId = inject<string>('paneId', '')
 
 const arrowColor = computed(() => {
   const _theme = settings.theme
@@ -424,6 +426,10 @@ function recomputeArrows() {
   const results: RenderedArrow[] = []
 
   for (const arrow of appStore.arrows.values()) {
+    // In split view, only render arrows belonging to this pane's page
+    const paneCtx = panes.get(paneId)
+    if (paneCtx?.pageId && arrow.pageId !== paneCtx.pageId) continue
+
     const sourceRect = getNoteRect(arrow.sourceNoteId)
     const targetRect = getNoteRect(arrow.targetNoteId)
     if (!sourceRect || !targetRect) continue
@@ -452,7 +458,7 @@ function recomputeArrows() {
 }
 
 // Register direct callback so drag/resize can trigger recompute
-appStore.setArrowRecompute(recomputeArrows)
+appStore.setArrowRecompute(recomputeArrows, paneId)
 
 // Re-resolve arrow colors when user theme CSS is reloaded
 watch(themeReloadCount, () => recomputeArrows())
@@ -651,6 +657,7 @@ async function handleDragUp(ev: PointerEvent) {
       // Undo action
       history.pushAction({
         description: 'Reconnect arrow',
+        pageId: arrow.pageId,
         notesBefore: {},
         notesAfter: {},
         arrowsBefore: { [arrowId]: arrowBefore! },

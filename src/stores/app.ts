@@ -12,6 +12,7 @@ import {
   getStorage,
   currentPageId,
   currentPage,
+  loadedPages,
   notes,
   arrows,
   links,
@@ -25,6 +26,7 @@ import {
   editingNoteId,
   dragTick,
   setArrowRecompute,
+  clearArrowRecompute,
   triggerArrowRecompute,
   rootNotes,
   selectedNotes,
@@ -39,7 +41,26 @@ import {
   dragSessionNoteIds,
   dropInsertParentId,
   dropInsertIndex,
+  getRootNotesForPage,
+  getRootIdsForPage,
 } from './state'
+
+// ── Panes ──
+import {
+  panes,
+  activePaneId,
+  activePane,
+  splitActive,
+  loadedPageIds,
+  paneCountForPage,
+  getOtherPane,
+  initPrimaryPane,
+  openSplitPane,
+  closeSplitPane,
+  setPanePage,
+  setActivePane,
+  orderedPanes,
+} from './panes'
 
 // ── Selection ──
 import {
@@ -115,7 +136,7 @@ import {
 
 // ── History integration ──
 // Called by history module to apply undo/redo snapshots.
-// This is the one piece of "glue" that touches all domains.
+// Multi-page aware: uses loadedPages to find the right page for rootIds.
 
 history.setApplySnapshot(async (action, direction) => {
   const noteSnaps = direction === 'undo' ? action.notesBefore : action.notesAfter
@@ -130,19 +151,16 @@ history.setApplySnapshot(async (action, direction) => {
   // Apply note snapshots
   for (const [id, snapshot] of Object.entries(noteSnaps)) {
     if (snapshot === null) {
-      // Delete
       notes.delete(id)
       await storage.deleteNotes([id])
     } else {
       const existing = notes.get(id)
       if (existing) {
-        // Note exists → merge diff (or full snapshot) into it
         for (const [key, value] of Object.entries(snapshot)) {
           ;(existing as any)[key] = deepClone(value)
         }
         await persistNote(existing)
       } else if (history.isFullNote(snapshot)) {
-        // Note doesn't exist → must be a full Note for create/restore
         const restored = deepClone(snapshot)
         notes.set(id, restored)
         await persistNote(restored)
@@ -164,10 +182,7 @@ history.setApplySnapshot(async (action, direction) => {
     }
   }
 
-  // Clean up orphaned arrows — any arrow whose source or target note
-  // no longer exists after this undo/redo step. This handles the case
-  // where note creation and arrow creation are separate undo actions:
-  // undoing the note leaves the arrow dangling.
+  // Clean up orphaned arrows
   const orphanedIds: string[] = []
   for (const [id, arrow] of arrows) {
     if (!notes.has(arrow.sourceNoteId) || !notes.has(arrow.targetNoteId)) {
@@ -206,27 +221,43 @@ history.setApplySnapshot(async (action, direction) => {
     await storage.deleteLinks(orphanedLinkIds)
   }
 
-  // Apply root IDs
-  if (rootIds !== null && currentPage.value) {
-    currentPage.value.rootNoteIds = [...rootIds]
-    await persistPage()
+  // Apply root IDs — use the action's pageId to find the right page
+  if (rootIds !== null) {
+    const page = loadedPages.get(action.pageId)
+    if (page) {
+      page.rootNoteIds = [...rootIds]
+      await persistPage(page)
+    }
   }
 
-  // Restore selection
-  selectedNoteIds.clear()
-  selectedArrowIds.clear()
-  for (const id of selection) {
-    if (notes.has(id)) selectedNoteIds.add(id)
-  }
-  for (const id of arrowSel) {
-    if (arrows.has(id)) selectedArrowIds.add(id)
-  }
-  editingNoteId.value = null
+  // Restore selection — route to the pane that owns this page
+  const targetPane = (() => {
+    for (const p of panes.values()) {
+      if (p.pageId === action.pageId) return p
+    }
+    return null
+  })()
 
-  // Rebuild parent map (undo/redo may have changed parent-child relationships)
+  if (targetPane && targetPane.id === activePaneId.value) {
+    // Active pane — update globals directly
+    selectedNoteIds.clear()
+    selectedArrowIds.clear()
+    for (const id of selection) {
+      if (notes.has(id)) selectedNoteIds.add(id)
+    }
+    for (const id of arrowSel) {
+      if (arrows.has(id)) selectedArrowIds.add(id)
+    }
+    editingNoteId.value = null
+  } else if (targetPane) {
+    // Different pane — update its context directly (don't touch active pane globals)
+    targetPane.selectedNoteIds = new Set(selection.filter(id => notes.has(id)))
+    targetPane.selectedArrowIds = new Set(arrowSel.filter(id => arrows.has(id)))
+    targetPane.editingNoteId = null
+    targetPane.editStartSnapshot = null
+  }
+
   rebuildParentMap()
-
-  // Recompute arrows since note positions/existence may have changed
   triggerArrowRecompute()
 })
 
@@ -239,6 +270,7 @@ export const appStore = {
   // State
   currentPageId,
   currentPage,
+  loadedPages,
   notes,
   arrows,
   pageList,
@@ -249,6 +281,7 @@ export const appStore = {
   editingNoteId,
   dragTick,
   setArrowRecompute,
+  clearArrowRecompute,
   triggerArrowRecompute,
   dragSessionNoteIds,
   dropInsertParentId,
@@ -257,6 +290,23 @@ export const appStore = {
   // Computed
   rootNotes,
   selectedNotes,
+  getRootNotesForPage,
+  getRootIdsForPage,
+
+  // Panes
+  panes,
+  activePaneId,
+  activePane,
+  splitActive,
+  loadedPageIds,
+  paneCountForPage,
+  getOtherPane,
+  initPrimaryPane,
+  openSplitPane,
+  closeSplitPane,
+  setPanePage,
+  setActivePane,
+  orderedPanes,
 
   // Selection
   selectNote,

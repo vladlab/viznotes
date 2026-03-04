@@ -263,6 +263,7 @@ export async function pasteNotes(
 
   history.pushAction({
     description: 'Paste notes',
+    pageId: currentPage.value?.id ?? '',
     notesBefore,
     notesAfter,
     arrowsBefore,

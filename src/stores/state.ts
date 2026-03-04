@@ -1,15 +1,16 @@
 /**
  * Shared reactive state, storage accessor, and low-level helpers.
  * This is the foundation that all other store modules import from.
- * No store module imports should appear here — only Vue, types, and history.
+ * No store module imports should appear here — only Vue, types, and panes.
  */
 
-import { reactive, ref, computed, toRaw, nextTick } from 'vue'
+import { reactive, ref, computed, toRaw, nextTick, watch } from 'vue'
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
 import type { Link } from '../types/link'
 import type { Page, PageSummary } from '../types/page'
 import type { StorageBackend } from '../storage/interface'
+import { activePane, activePaneId, panes, type PaneContext } from './panes'
 
 // ── Storage ──
 
@@ -31,11 +32,23 @@ export function deepClone<T>(obj: T): T {
 
 // ── Reactive state ──
 
-export const currentPageId = ref<string | null>(null)
-export const currentPage = ref<Page | null>(null)
+// Multi-page: all loaded pages keyed by pageId
+export const loadedPages = reactive<Map<string, Page>>(new Map())
+
+// Active pane's page (computed — most existing code reads these)
+export const currentPageId = computed<string | null>(() => {
+  return activePane.value?.pageId ?? null
+})
+export const currentPage = computed<Page | null>(() => {
+  const id = activePane.value?.pageId
+  return id ? loadedPages.get(id) ?? null : null
+})
+
+// Shared data maps — hold items from ALL loaded pages
 export const notes = reactive<Map<string, Note>>(new Map())
 export const arrows = reactive<Map<string, Arrow>>(new Map())
 export const links = reactive<Map<string, Link>>(new Map())
+
 export const pageList = ref<PageSummary[]>([])
 export const pageHistory = ref<string[]>([])
 export const loading = ref(false)
@@ -54,23 +67,29 @@ export const dropInsertParentId = ref<string | null>(null)
 export const dropInsertIndex = ref<number>(-1)
 
 // Direct callback for arrow recomputation — set by ArrowLayer
-let arrowRecomputeCallback: (() => void) | null = null
+// Now per-pane: Map of paneId → callback
+const arrowRecomputeCallbacks = new Map<string, () => void>()
 
-export function setArrowRecompute(fn: () => void) {
-  arrowRecomputeCallback = fn
+export function setArrowRecompute(fn: () => void, paneId?: string) {
+  const id = paneId ?? activePaneId.value
+  if (id) arrowRecomputeCallbacks.set(id, fn)
+}
+
+export function clearArrowRecompute(paneId: string) {
+  arrowRecomputeCallbacks.delete(paneId)
 }
 
 export function triggerArrowRecompute() {
   dragTick.value++
-  // nextTick ensures Vue has flushed DOM, rAF ensures browser has laid out
   nextTick(() => {
     requestAnimationFrame(() => {
-      if (arrowRecomputeCallback) arrowRecomputeCallback()
+      for (const fn of arrowRecomputeCallbacks.values()) fn()
     })
   })
 }
 
-// Selection & editing
+// Selection & editing — these globals reflect the ACTIVE pane's state.
+// When active pane changes, we swap the backing data.
 export const selectedNoteIds = reactive(new Set<string>())
 export const selectedArrowIds = reactive(new Set<string>())
 export const editingNoteId = ref<string | null>(null)
@@ -80,7 +99,51 @@ export let editStartSnapshot: Note | null = null
 
 export function setEditStartSnapshot(snapshot: Note | null) {
   editStartSnapshot = snapshot
+  // Also sync to pane context
+  const pane = activePane.value
+  if (pane) pane.editStartSnapshot = snapshot
 }
+
+// ── Pane selection sync ──
+
+/** Save current globals into the given pane context */
+export function saveSelectionToPane(pane: PaneContext) {
+  pane.selectedNoteIds = new Set(selectedNoteIds)
+  pane.selectedArrowIds = new Set(selectedArrowIds)
+  pane.editingNoteId = editingNoteId.value
+  pane.editStartSnapshot = editStartSnapshot
+}
+
+/** Restore globals from the given pane context */
+export function restoreSelectionFromPane(pane: PaneContext) {
+  selectedNoteIds.clear()
+  for (const id of pane.selectedNoteIds) selectedNoteIds.add(id)
+  selectedArrowIds.clear()
+  for (const id of pane.selectedArrowIds) selectedArrowIds.add(id)
+  editingNoteId.value = pane.editingNoteId
+  editStartSnapshot = pane.editStartSnapshot
+}
+
+// Watch for active pane changes and swap selection
+let _prevPaneId: string | null = null
+watch(activePaneId, (newId, oldId) => {
+  // Save outgoing pane's selection
+  if (oldId) {
+    const oldPane = panes.get(oldId)
+    if (oldPane) saveSelectionToPane(oldPane)
+  }
+  // Restore incoming pane's selection
+  if (newId) {
+    const newPane = panes.get(newId)
+    if (newPane) restoreSelectionFromPane(newPane)
+  } else {
+    selectedNoteIds.clear()
+    selectedArrowIds.clear()
+    editingNoteId.value = null
+    editStartSnapshot = null
+  }
+  _prevPaneId = newId
+})
 
 // ── Computed ──
 
@@ -97,6 +160,30 @@ export const selectedNotes = computed(() => {
     .filter((n): n is Note => n !== undefined)
 })
 
+// ── Per-page helpers ──
+
+/** Get root note IDs for a specific page (used by per-pane rendering) */
+export function getRootIdsForPage(pageId: string): string[] {
+  const page = loadedPages.get(pageId)
+  return page ? [...page.rootNoteIds] : []
+}
+
+/** Get root notes for a specific page (used by CanvasView per-pane) */
+export function getRootNotesForPage(pageId: string): Note[] {
+  const page = loadedPages.get(pageId)
+  if (!page) return []
+  return page.rootNoteIds
+    .map(id => notes.get(id))
+    .filter((n): n is Note => n !== undefined)
+}
+
+/** Get the Page object for a note's pageId */
+export function getPageForNote(noteId: string): Page | null {
+  const note = notes.get(noteId)
+  if (!note) return null
+  return loadedPages.get(note.pageId) ?? null
+}
+
 // ── Internal helpers ──
 
 export function getRootIds(): string[] {
@@ -112,17 +199,18 @@ export async function persistNote(note: Note) {
   await storage.saveNote(note)
 }
 
-export async function persistPage() {
-  if (currentPage.value) {
-    currentPage.value.updatedAt = Date.now()
-    await storage.savePage(currentPage.value)
+export async function persistPage(page?: Page) {
+  const p = page ?? currentPage.value
+  if (p) {
+    p.updatedAt = Date.now()
+    await storage.savePage(p)
   }
 }
 
 // ── Batched save system ──
 
 const dirtyNoteIds = new Set<string>()
-const dirtyPage = ref(false)
+const dirtyPageIds = new Set<string>()
 export const hasPendingSaves = ref(false)
 let _saveBatchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -137,57 +225,67 @@ export function markNoteDirty(note: Note, delay = 300) {
   scheduleSave(delay)
 }
 
-export function markPageDirty(delay = 300) {
-  dirtyPage.value = true
+export function markPageDirty(delay = 300, pageId?: string) {
+  const id = pageId ?? currentPage.value?.id
+  if (id) dirtyPageIds.add(id)
   scheduleSave(delay)
 }
 
 export async function flushPendingSaves() {
   if (_saveBatchTimer) { clearTimeout(_saveBatchTimer); _saveBatchTimer = null }
 
-  // Capture dirty state atomically — any markNoteDirty/markPageDirty calls
-  // that arrive during the async save will re-populate these for the next flush.
   const pendingNoteIds = dirtyNoteIds.size > 0 ? new Set(dirtyNoteIds) : null
-  const pendingPage = dirtyPage.value
+  const pendingPageIds = dirtyPageIds.size > 0 ? new Set(dirtyPageIds) : null
   dirtyNoteIds.clear()
-  dirtyPage.value = false
+  dirtyPageIds.clear()
 
   const now = Date.now()
 
-  // Collect dirty notes
-  const notesToSave: Note[] = []
+  // Group dirty notes by pageId
+  const notesByPage = new Map<string, Note[]>()
   if (pendingNoteIds) {
     for (const id of pendingNoteIds) {
       const note = notes.get(id)
       if (note) {
         note.updatedAt = now
-        notesToSave.push(toRaw(note))
+        const list = notesByPage.get(note.pageId) || []
+        list.push(toRaw(note))
+        notesByPage.set(note.pageId, list)
       }
     }
   }
 
-  // Write to storage — single writePageFile when both are dirty
   try {
-  if (pendingPage && currentPage.value && notesToSave.length > 0) {
-    // Combined: page metadata + notes in one atomic write
-    currentPage.value.updatedAt = now
-    await storage.savePageBundle(toRaw(currentPage.value), notesToSave)
-  } else if (notesToSave.length > 0) {
-    await storage.saveNotes(notesToSave)
-  } else if (pendingPage && currentPage.value) {
-    currentPage.value.updatedAt = now
-    await storage.savePage(toRaw(currentPage.value))
+    // For each page that has dirty notes and/or dirty page metadata
+    const allPageIds = new Set([
+      ...notesByPage.keys(),
+      ...(pendingPageIds ?? []),
+    ])
+
+    for (const pageId of allPageIds) {
+      const page = loadedPages.get(pageId)
+      const pageNotes = notesByPage.get(pageId)
+      const pageDirty = pendingPageIds?.has(pageId) ?? false
+
+      if (pageDirty && page && pageNotes && pageNotes.length > 0) {
+        page.updatedAt = now
+        await storage.savePageBundle(toRaw(page), pageNotes)
+      } else if (pageNotes && pageNotes.length > 0) {
+        await storage.saveNotes(pageNotes)
+      } else if (pageDirty && page) {
+        page.updatedAt = now
+        await storage.savePage(toRaw(page))
+      }
     }
   } catch (e) {
     console.error("[flushPendingSaves] Write failed, re-queuing:", e)
     if (pendingNoteIds) { for (const id of pendingNoteIds) dirtyNoteIds.add(id) }
-    if (pendingPage) dirtyPage.value = true
+    if (pendingPageIds) { for (const id of pendingPageIds) dirtyPageIds.add(id) }
     scheduleSave(1000)
     return
   }
 
-  // Only clear the pending indicator if nothing new arrived during the flush.
-  if (dirtyNoteIds.size === 0 && !dirtyPage.value) {
+  if (dirtyNoteIds.size === 0 && dirtyPageIds.size === 0) {
     hasPendingSaves.value = false
   }
 }
@@ -195,10 +293,12 @@ export async function flushPendingSaves() {
 // ── Z-index ──
 
 export function bringToTop(note: Note) {
-  if (!currentPage.value) return
-  note.zIndex = currentPage.value.nextZIndex++
+  // Look up the note's page (may not be currentPage in split view)
+  const page = loadedPages.get(note.pageId) ?? currentPage.value
+  if (!page) return
+  note.zIndex = page.nextZIndex++
   markNoteDirty(note)
-  markPageDirty()
+  markPageDirty(300, note.pageId)
 }
 
 // ── Parent lookup map (childId → parentId) ──
@@ -223,7 +323,6 @@ export function rebuildParentMap() {
     let cur = id
     while (parentMap.has(cur)) {
       if (visited.has(cur)) {
-        // Cycle detected: break it by removing this child from its parent's childIds
         const badParentId = parentMap.get(cur)!
         const badParent = notes.get(badParentId)
         if (badParent) {
@@ -259,3 +358,49 @@ export function removeParents(ids: string[]) {
 // ── Drag session tracking (for arrow rect caching) ──
 
 export const dragSessionNoteIds = reactive(new Set<string>())
+
+// ── Page data lifecycle ──
+
+/** Load a page's data into shared Maps (additive — does not clear other pages) */
+export function loadPageData(
+  page: Page,
+  pageNotes: Note[],
+  pageArrows: Arrow[],
+  pageLinks: Link[],
+) {
+  loadedPages.set(page.id, page)
+  for (const note of pageNotes) {
+    // Backward compat: add autoBody/foldState for notes saved before these fields existed
+    if (!note.autoBody) {
+      note.autoBody = { enabled: false, content: { type: 'doc', content: [{ type: 'paragraph' }] }, wrap: true, height: 'auto' }
+    }
+    if (!note.foldState) {
+      note.foldState = {
+        autoBody: note.collapsed ?? false,
+        body: note.collapsed ?? false,
+        container: note.collapsed ?? false,
+        links: note.collapsed ?? false,
+      }
+    }
+    notes.set(note.id, note)
+  }
+  for (const arrow of pageArrows) arrows.set(arrow.id, arrow)
+  for (const link of pageLinks) links.set(link.id, link)
+  rebuildParentMap()
+}
+
+/** Unload a page's data from shared Maps (only if no pane still references it) */
+export function unloadPageData(pageId: string) {
+  loadedPages.delete(pageId)
+  // Remove notes, arrows, links belonging to this page
+  for (const [id, note] of notes) {
+    if (note.pageId === pageId) notes.delete(id)
+  }
+  for (const [id, arrow] of arrows) {
+    if (arrow.pageId === pageId) arrows.delete(id)
+  }
+  for (const [id, link] of links) {
+    if (link.pageId === pageId) links.delete(id)
+  }
+  rebuildParentMap()
+}

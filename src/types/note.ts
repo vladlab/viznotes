@@ -52,11 +52,19 @@ export interface NoteColor {
   value: string  // color name or hex
 }
 
+export interface NoteFoldState {
+  autoBody: boolean  // true = section is folded/hidden
+  body: boolean
+  container: boolean
+  links: boolean
+}
+
 export interface Note {
   id: string
   pageId: string
 
   head: NoteTextSection
+  autoBody: NoteTextSection
   body: NoteTextSection
   container: NoteContainer
 
@@ -71,6 +79,7 @@ export interface Note {
   fileSize?: number  // file size in bytes (for file-linked notes)
 
   collapsed: boolean
+  foldState: NoteFoldState
   movable: boolean
   resizable: boolean
 
@@ -91,6 +100,12 @@ export function createDefaultNote(
 
     head: {
       enabled: true,
+      content: { type: 'doc', content: [{ type: 'paragraph' }] },
+      wrap: true,
+      height: 'auto',
+    },
+    autoBody: {
+      enabled: false,
       content: { type: 'doc', content: [{ type: 'paragraph' }] },
       wrap: true,
       height: 'auto',
@@ -118,6 +133,7 @@ export function createDefaultNote(
     link: '',
 
     collapsed: false,
+    foldState: { autoBody: false, body: false, container: false, links: false },
     movable: true,
     resizable: true,
 

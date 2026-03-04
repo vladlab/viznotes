@@ -4,8 +4,8 @@
     <main class="main-content">
       <Breadcrumbs />
       <FormatBar v-if="appStore.currentPage.value" />
-      <CanvasView v-if="appStore.currentPage.value" />
-      <div v-else class="welcome-screen">
+      <SplitView v-if="hasAnyPage" />
+      <div v-if="!hasAnyPage" class="welcome-screen">
         <h1>vizNotes</h1>
         <p>Create a page to get started, or select one from the sidebar.</p>
         <button class="welcome-btn" @click="createFirst">
@@ -16,6 +16,18 @@
         </button>
       </div>
     </main>
+    <button
+      v-if="hasAnyPage"
+      class="window-split-btn"
+      :class="{ active: appStore.splitActive.value }"
+      @click="toggleSplit"
+      :title="appStore.splitActive.value ? 'Close split view' : 'Split view'"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <line x1="12" y1="3" x2="12" y2="21" />
+      </svg>
+    </button>
     <button class="window-close-btn" @click="closeWindow" title="Close window">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -29,19 +41,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import Breadcrumbs from './components/Breadcrumbs.vue'
 import FormatBar from './components/FormatBar.vue'
-import CanvasView from './components/CanvasView.vue'
+import SplitView from './components/SplitView.vue'
 import VaultPicker from './components/VaultPicker.vue'
 import { appStore } from './stores/app'
+import { initPrimaryPane, panes } from './stores/panes'
+import { flushPendingSaves, unloadPageData } from './stores/state'
+import { history } from './stores/history'
 import { getVaultPath, setVaultPath, createFileStorage } from './storage/index'
 import { loadSettings } from './stores/settings'
 import { loadUserTheme } from './utils/themeLoader'
 
 const ready = ref(false)
 const needsVault = ref(false)
+
+// Check if any pane has a page loaded
+const hasAnyPage = computed(() => {
+  for (const pane of panes.values()) {
+    if (pane.pageId) return true
+  }
+  return false
+})
 
 // Flush pending saves before the window closes (best-effort, fires synchronously)
 function onBeforeUnload() {
@@ -71,6 +94,8 @@ async function initWithVault(vaultPath: string) {
     const storage = await createFileStorage(vaultPath)
     appStore.setStorage(storage)
     await appStore.loadPageList()
+    // Initialize the primary pane
+    initPrimaryPane(null)
     ready.value = true
   } catch (e) {
     console.error('Failed to init vault:', e)
@@ -94,6 +119,25 @@ async function createFirst() {
   await appStore.navigateToPage(page.id, false)
 }
 
+async function toggleSplit() {
+  if (appStore.splitActive.value) {
+    // Close the secondary (right) pane
+    const allPanes = Array.from(panes.values())
+    const secondary = allPanes.find(p => p.id !== allPanes[0]?.id)
+    if (secondary) {
+      const closedPageId = appStore.closeSplitPane(secondary.id)
+      if (closedPageId && appStore.paneCountForPage(closedPageId) === 0) {
+        await flushPendingSaves()
+        unloadPageData(closedPageId)
+        history.purgePageActions(closedPageId)
+      }
+    }
+  } else {
+    const newPane = appStore.openSplitPane(null)
+    appStore.setActivePane(newPane.id)
+  }
+}
+
 async function closeWindow() {
   await appStore.flushPendingSaves()
   try {
@@ -107,6 +151,32 @@ async function closeWindow() {
 </script>
 
 <style scoped>
+.window-split-btn {
+  position: fixed;
+  top: 6px;
+  right: 40px;
+  z-index: 9999;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+}
+.window-split-btn:hover {
+  opacity: 1;
+  background: var(--bg-surface-hover);
+}
+.window-split-btn.active {
+  opacity: 0.9;
+  color: var(--accent);
+}
 .window-close-btn {
   position: fixed;
   top: 6px;

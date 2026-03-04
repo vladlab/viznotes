@@ -1,6 +1,6 @@
 <template>
   <div
-    v-if="section.enabled"
+    v-if="sectionName === 'autoBody' || section.enabled"
     class="note-text-section"
     :class="[
       `note-${sectionName}`,
@@ -37,17 +37,18 @@ import { activeEditor } from '../stores/editor'
 
 const props = defineProps<{
   note: Note
-  sectionName: 'head' | 'body'
+  sectionName: 'head' | 'body' | 'autoBody'
 }>()
 
 const section = computed(() => props.note[props.sectionName])
 const isEditing = computed(() => appStore.editingNoteId.value === props.note.id)
+const isReadOnly = computed(() => props.sectionName === 'autoBody')
 
 let suppressContentWatch = false
 
 const editor = useEditor({
   content: section.value.content,
-  editable: isEditing.value,
+  editable: isReadOnly.value ? false : isEditing.value,
   extensions: [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -78,6 +79,7 @@ const editor = useEditor({
     },
   },
   onUpdate: ({ editor }) => {
+    if (isReadOnly.value) return
     suppressContentWatch = true
     props.note[props.sectionName].content = editor.getJSON()
     appStore.markNoteDirty(props.note, 500)
@@ -96,6 +98,7 @@ function onFocusIn() {
 
 watch(isEditing, (editing) => {
   if (editor.value) {
+    if (isReadOnly.value) return  // autoBody never becomes editable
     editor.value.setEditable(editing)
     if (editing) {
       if (props.sectionName === 'head') {
@@ -248,6 +251,17 @@ onBeforeUnmount(() => {
 .note-body {
   font-size: 0.85em;
   opacity: 0.9;
+}
+
+.note-autoBody {
+  font-size: 0.8em;
+  opacity: 0.75;
+  background: var(--auto-body-bg, rgba(255, 255, 255, 0.03));
+  border-left: 2px solid var(--text-faint, #555);
+  margin: 0 6px;
+  border-radius: 0 4px 4px 0;
+  user-select: text;
+  cursor: default;
 }
 
 .note-editor .tiptap {

@@ -59,6 +59,7 @@ export async function createLink(noteIdA: string, noteIdB: string): Promise<Link
 
   history.pushAction({
     description: 'Create link',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: {},
     notesAfter: {},
     linksBefore: { [saved.id]: null },
@@ -83,6 +84,7 @@ export async function deleteLink(linkId: string) {
 
   history.pushAction({
     description: 'Delete link',
+    pageId: currentPage.value?.id ?? '',
     notesBefore: {},
     notesAfter: {},
     linksBefore: { [linkId]: deepClone(link) },

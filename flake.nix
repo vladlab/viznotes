@@ -53,8 +53,8 @@
             export GIO_EXTRA_MODULES="${pkgs.dconf.lib}/lib/gio/modules"
 
             # WebKitGTK workarounds for Wayland + NVIDIA
-            #export GDK_BACKEND=x11
-            #export WEBKIT_DISABLE_DMABUF_RENDERER=1
+            #Rexport GDK_BACKEND=x11
+            export WEBKIT_DISABLE_DMABUF_RENDERER=1
 
             echo "🚀 vizNotes dev environment (Tauri 2)"
             echo "   node: $(node --version)"
