@@ -76,10 +76,25 @@ export function setSectionBlocks(note: Note, key: string, contentBlocks: any[]) 
   note.autoBody.content = { type: 'doc', content: blocks }
 }
 
+/** Strip leading empty paragraphs (TipTap doc initialization artifact). */
+function stripLeadingEmpty(blocks: any[]): any[] {
+  let i = 0
+  while (i < blocks.length) {
+    const b = blocks[i]
+    if (b.type === 'paragraph' && (!b.content || b.content.length === 0)) {
+      i++
+    } else {
+      break
+    }
+  }
+  return i > 0 ? blocks.slice(i) : blocks
+}
+
 /** Replace an entire named section (creates it if missing). */
 export function replaceAutoSection(note: Note, key: string, contentBlocks: any[]) {
   ensureAutoBody(note)
-  const blocks = note.autoBody.content?.content ? [...note.autoBody.content.content] : []
+  let blocks = note.autoBody.content?.content ? [...note.autoBody.content.content] : []
+  blocks = stripLeadingEmpty(blocks)
   const range = findSectionRange(blocks, key)
   const newSection = [markerBlock(key), ...contentBlocks]
 
@@ -94,7 +109,8 @@ export function replaceAutoSection(note: Note, key: string, contentBlocks: any[]
 /** Append content to a named section (creates it if missing). */
 export function appendAutoSection(note: Note, key: string, contentBlocks: any[]) {
   ensureAutoBody(note)
-  const blocks = note.autoBody.content?.content ? [...note.autoBody.content.content] : []
+  let blocks = note.autoBody.content?.content ? [...note.autoBody.content.content] : []
+  blocks = stripLeadingEmpty(blocks)
   const range = findSectionRange(blocks, key)
 
   if (range) {
@@ -115,4 +131,19 @@ function ensureAutoBody(note: Note) {
     }
   }
   note.autoBody.enabled = true
+}
+
+/** Check if a note has visible autoBody content (markers, text, images). */
+export function noteHasAutoBody(note: Note): boolean {
+  const ab = note.autoBody
+  if (!ab || !ab.enabled) return false  // Fast path: most notes
+  const blocks = ab.content?.content
+  if (!blocks || blocks.length === 0) return false
+  // Check for any block with actual content (skip empty paragraphs)
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]
+    if (b.type === 'image') return true
+    if (b.content && b.content.length > 0) return true
+  }
+  return false
 }

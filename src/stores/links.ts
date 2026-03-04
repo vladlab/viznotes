@@ -5,6 +5,7 @@
 
 import type { Link } from '../types/link'
 import { createDefaultLink } from '../types/link'
+import { computed } from 'vue'
 import { history } from './history'
 import {
   links,
@@ -17,15 +18,24 @@ import {
   getStorage,
 } from './state'
 
+/** Indexed map from noteId → links involving that note. Rebuilt once per links change. */
+const linkIndex = computed(() => {
+  const idx = new Map<string, Link[]>()
+  for (const link of links.values()) {
+    let a = idx.get(link.noteIdA)
+    if (!a) { a = []; idx.set(link.noteIdA, a) }
+    a.push(link)
+
+    let b = idx.get(link.noteIdB)
+    if (!b) { b = []; idx.set(link.noteIdB, b) }
+    b.push(link)
+  }
+  return idx
+})
+
 /** Get all links involving a given note. */
 export function getLinksForNote(noteId: string): Link[] {
-  const result: Link[] = []
-  for (const link of links.values()) {
-    if (link.noteIdA === noteId || link.noteIdB === noteId) {
-      result.push(link)
-    }
-  }
-  return result
+  return linkIndex.value.get(noteId) || []
 }
 
 /** Get the ID of the "other" note in a link. */

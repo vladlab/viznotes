@@ -4,7 +4,6 @@
     class="note-outer"
     :class="{
       collapsed: note.collapsed,
-      'collapsed-stack': (note.collapsed || note.foldState?.container) && note.container.enabled && note.container.childIds.length > 0,
       'in-list': !spatial,
       'is-selected': isSelected,
       'is-editing': isEditing,
@@ -245,7 +244,7 @@ import { computed, ref, watch, inject, onBeforeUnmount, nextTick } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import type { Note } from '../types/note'
-import { replaceAutoSection, appendAutoSection, getSectionBlocks, setSectionBlocks } from '../utils/autoSections'
+import { replaceAutoSection, appendAutoSection, getSectionBlocks, setSectionBlocks, noteHasAutoBody } from '../utils/autoSections'
 import { showToast, clearToast } from '../stores/toast'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
@@ -289,7 +288,7 @@ const contextMenuRef = ref<HTMLElement | null>(null)
 const hasMultipleSections = computed(() => {
   let count = 0
   if (props.note.head.enabled) count++
-  if (props.note.autoBody?.enabled) count++
+  if (hasAutoBody.value) count++
   if (props.note.body.enabled) count++
   if (props.note.container.enabled) count++
   if (noteLinks.value.length > 0) count++
@@ -298,14 +297,7 @@ const hasMultipleSections = computed(() => {
 
 // Per-section fold helpers
 const noteLinks = computed(() => appStore.getLinksForNote(props.note.id))
-const hasAutoBody = computed(() => {
-  const ab = props.note.autoBody
-  if (!ab) return false
-  const blocks = ab.content?.content
-  if (!blocks || blocks.length === 0) return false
-  // Show section if any block has actual text/image content
-  return blocks.some((b: any) => (b.content && b.content.length > 0) || b.type === 'image')
-})
+const hasAutoBody = computed(() => noteHasAutoBody(props.note))
 const hasContainer = computed(() => props.note.container.enabled && props.note.container.childIds.length > 0)
 const hasLinks = computed(() => noteLinks.value.length > 0)
 const containerChildCount = computed(() => props.note.container.childIds.length)
@@ -1220,41 +1212,6 @@ function extractPlainText(content: any): string {
 .note-outer.is-editing > .note-frame {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-
-/* Collapsed container: stacked-card effect */
-.note-outer.collapsed-stack {
-  margin-bottom: 6px;  /* space for the pseudo-cards */
-  margin-right: 6px;
-}
-
-.note-outer.collapsed-stack > .note-frame {
-  z-index: 2;
-}
-
-.note-outer.collapsed-stack::before,
-.note-outer.collapsed-stack::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  border-radius: 6px;
-  border: 1.5px solid var(--note-border);
-  background: var(--note-bg);
-  pointer-events: none;
-}
-
-.note-outer.collapsed-stack::before {
-  z-index: 1;
-  transform: translate(3px, 3px);
-}
-
-.note-outer.collapsed-stack::after {
-  z-index: 0;
-  transform: translate(6px, 6px);
-  opacity: 0.6;
 }
 
 /* Node type header bar — Blender-style title strip */

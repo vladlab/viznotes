@@ -118,7 +118,7 @@ function onDoubleClick(e: MouseEvent) {
 .note-container-list.columns-row {
   flex-direction: row;
   align-items: stretch;
-  gap: 3px;
+  gap: 6px;
   min-height: 120px;
   padding: 4px;
 }

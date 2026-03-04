@@ -119,13 +119,10 @@ watch(
   () => section.value.content,
   (newContent) => {
     if (suppressContentWatch || !editor.value) return
-    const editorJson = JSON.stringify(editor.value.getJSON())
-    const newJson = JSON.stringify(newContent)
-    if (editorJson !== newJson) {
-      editor.value.commands.setContent(newContent, false)
-    }
+    // Reference changed → content was replaced externally (undo, analysis, etc.)
+    // Let ProseMirror handle its own diffing via setContent
+    editor.value.commands.setContent(newContent, false)
   },
-  { deep: true }
 )
 
 const sectionStyle = computed(() => {

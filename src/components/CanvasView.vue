@@ -179,7 +179,7 @@ import type { Note } from '../types/note'
 import type { ResizeHandle } from '../composables/useResize'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
-import { appendAutoSection, replaceAutoSection } from '../utils/autoSections'
+import { appendAutoSection, replaceAutoSection, noteHasAutoBody } from '../utils/autoSections'
 import { getStorage, loadedPages, getRootNotesForPage, clearArrowRecompute } from '../stores/state'
 import { panes, setActivePane } from '../stores/panes'
 import { settings } from '../stores/settings'
@@ -262,7 +262,7 @@ function toggleCollapseSelected() {
 
     // Determine which sections are present on this note
     const present: ('autoBody' | 'body' | 'container' | 'links')[] = []
-    if (note.autoBody?.enabled) present.push('autoBody')
+    if (noteHasAutoBody(note)) present.push('autoBody')
     if (note.body.enabled) present.push('body')
     if (note.container.enabled && note.container.childIds.length > 0) present.push('container')
     if (appStore.getLinksForNote(note.id).length > 0) present.push('links')
@@ -1131,6 +1131,11 @@ function noteToHtml(noteId: string, headingLevel: number, images: Set<string>): 
         }
       }
     }
+  }
+
+  // AutoBody (Data: file path, analysis, file history)
+  if (noteHasAutoBody(note) && note.autoBody.content) {
+    parts.push(tiptapToHtml(note.autoBody.content, images))
   }
 
   // Body
