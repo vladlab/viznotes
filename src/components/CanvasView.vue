@@ -4,7 +4,7 @@
     class="canvas-container"
     :class="{ 'is-panning': canvas.isPanning.value || spaceHeld, 'is-linking': appStore.linkingSourceId.value }"
     tabindex="0"
-    @wheel.prevent="canvas.handleWheel"
+    @wheel.prevent="onWheel"
     @pointerdown="onCanvasPointerDown"
     @pointermove="canvas.handlePointerMove"
     @pointerup="canvas.handlePointerUp"
@@ -43,10 +43,10 @@
         </svg>
       </button>
       <div class="controls-separator" />
-      <button @click="canvas.zoomIn()" title="Zoom in">+</button>
+      <button @click="zoomToFitActive = false; canvas.zoomIn()" title="Zoom in">+</button>
       <span class="zoom-level">{{ zoomPercent }}%</span>
-      <button @click="canvas.zoomOut()" title="Zoom out">−</button>
-      <button @click="canvas.resetZoom()" title="Reset zoom to 100%">1:1</button>
+      <button @click="zoomToFitActive = false; canvas.zoomOut()" title="Zoom out">−</button>
+      <button @click="zoomToFitActive = false; canvas.resetZoom()" title="Reset zoom to 100%">1:1</button>
       <button @click="fitAllNotes" title="Fit all notes">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M15 3h6v6" />
@@ -219,6 +219,7 @@ let lastDragClientX = 0
 let lastDragClientY = 0
 const containerWidth = ref(800)
 const containerHeight = ref(600)
+const zoomToFitActive = ref(false)
 
 const scrollMode = computed(() => settings.scrollMode)
 
@@ -285,6 +286,7 @@ function toggleCollapseSelected() {
 }
 
 function centerOnSelection() {
+  zoomToFitActive.value = false
   const items = getSelectedNoteRects()
   if (items.length === 0) return
 
@@ -335,6 +337,7 @@ function fitAllNotes() {
   }
 
   canvas.fitAll(positions)
+  zoomToFitActive.value = true
 }
 
 function alignNotes(mode: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'center-v') {
@@ -448,11 +451,20 @@ const drag = useDrag(() => canvas.transform)
 const resize = useResize(() => canvas.transform)
 const boxSelection = useBoxSelection()
 
+// Wrap wheel to clear zoom-to-fit on manual scroll/zoom
+function onWheel(e: WheelEvent) {
+  zoomToFitActive.value = false
+  canvas.handleWheel(e)
+}
+
 // Provide drag/resize and drag state to child notes
 provide('paneId', props.paneId)
 provide('panePage', panePage)
 provide('activatePane', activatePane)
-provide('startDrag', drag.startDrag)
+provide('startDrag', (...args: Parameters<typeof drag.startDrag>) => {
+  zoomToFitActive.value = false
+  return drag.startDrag(...args)
+})
 provide('startResize', resize.startResize)
 provide('isDragging', drag.isDragging)
 provide('dragTargetId', drag.dragTargetId)
@@ -509,6 +521,7 @@ function onCanvasPointerDown(e: PointerEvent) {
 
   // Middle mouse always pans
   if (e.button === 1) {
+    zoomToFitActive.value = false
     canvas.handlePointerDown(e)
     return
   }
@@ -526,6 +539,7 @@ function onCanvasPointerDown(e: PointerEvent) {
 
     // Space+left-click = pan
     if (spaceHeld.value) {
+      zoomToFitActive.value = false
       canvas.isPanning.value = true
       const panStartX = e.clientX - canvas.transform.x
       const panStartY = e.clientY - canvas.transform.y
@@ -1383,7 +1397,7 @@ let resizeObserver: ResizeObserver | null = null
 let unlistenDragDrop: (() => void) | null = null
 
 // ── Per-page viewport memory ──
-const pageViewports = new Map<string, { x: number; y: number; scale: number }>()
+const pageViewports = new Map<string, { x: number; y: number; scale: number; fit?: boolean }>()
 
 function saveCurrentViewport() {
   const pageId = panePageId.value
@@ -1392,6 +1406,7 @@ function saveCurrentViewport() {
       x: canvas.transform.x,
       y: canvas.transform.y,
       scale: canvas.transform.scale,
+      fit: zoomToFitActive.value,
     })
   }
 }
@@ -1405,11 +1420,29 @@ function restoreOrFitViewport() {
     canvas.transform.x = saved.x
     canvas.transform.y = saved.y
     canvas.transform.scale = saved.scale
+    zoomToFitActive.value = saved.fit ?? false
   } else {
     // First visit to this page — fit all notes
     fitAllNotes()
   }
 }
+
+// Clear zoom-to-fit when user starts editing a note
+watch(() => appStore.editingNoteId.value, (id) => {
+  if (id) zoomToFitActive.value = false
+})
+
+// Re-fit after page data finishes loading (handles startup race on tiling WMs
+// where fitAllNotes runs before notes are in the DOM)
+watch(() => appStore.loading.value, (loading) => {
+  if (!loading && zoomToFitActive.value) {
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        if (zoomToFitActive.value) fitAllNotes()
+      })
+    })
+  }
+})
 
 // Save viewport before page switch, restore/fit after
 watch(() => panePageId.value, (_newId, oldId) => {
@@ -1418,6 +1451,7 @@ watch(() => panePageId.value, (_newId, oldId) => {
       x: canvas.transform.x,
       y: canvas.transform.y,
       scale: canvas.transform.scale,
+      fit: zoomToFitActive.value,
     })
   }
   nextTick(() => {
@@ -1430,6 +1464,7 @@ watch(() => panePageId.value, (_newId, oldId) => {
 // Pan to a note when focusNoteId is set (e.g. clicking a link chip)
 watch(() => appStore.focusNoteId.value, (noteId) => {
   if (!noteId) return
+  zoomToFitActive.value = false
   appStore.focusNoteId.value = null
 
   nextTick(() => {
@@ -1471,6 +1506,9 @@ onMounted(async () => {
       for (const entry of entries) {
         containerWidth.value = entry.contentRect.width
         containerHeight.value = entry.contentRect.height
+      }
+      if (zoomToFitActive.value) {
+        fitAllNotes()
       }
     })
     resizeObserver.observe(containerRef.value)
