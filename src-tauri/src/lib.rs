@@ -226,6 +226,29 @@ fn show_in_folder(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
+        // Try freedesktop FileManager1 DBus interface first (reveals file selected)
+        if p.is_file() {
+            let file_uri = format!("file://{}", &path);
+            let dbus_result = std::process::Command::new("gdbus")
+                .args([
+                    "call", "--session",
+                    "--dest", "org.freedesktop.FileManager1",
+                    "--object-path", "/org/freedesktop/FileManager1",
+                    "--method", "org.freedesktop.FileManager1.ShowItems",
+                    &format!("['{}']", file_uri),
+                    "",
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+
+            match dbus_result {
+                Ok(status) if status.success() => return Ok(()),
+                _ => {} // Fall through to xdg-open
+            }
+        }
+
+        // Fallback: open containing directory (no file selection)
         std::process::Command::new("xdg-open")
             .arg(&dir)
             .spawn()

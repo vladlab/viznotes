@@ -213,13 +213,7 @@ const canvasMenuVisible = ref(false)
 const canvasMenuPos = ref({ x: 0, y: 0 })
 const canvasMenuRef = ref<HTMLElement | null>(null)
 
-const toastMessage = ref('')
-let toastTimer: ReturnType<typeof setTimeout> | null = null
-function showToast(msg: string, duration = 2000) {
-  toastMessage.value = msg
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastMessage.value = '' }, duration)
-}
+import { toastMessage, showToast } from '../stores/toast'
 const canvasMenuWorldPos = ref({ x: 0, y: 0 })
 let lastDragClientX = 0
 let lastDragClientY = 0

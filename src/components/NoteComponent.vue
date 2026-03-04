@@ -43,8 +43,14 @@
           @click.stop="followLink"
           :title="linkTitle"
         >
-          <!-- File: open-folder action icon -->
-          <svg v-if="isFileLink" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <!-- File: open-folder action icon / missing file icon -->
+          <svg v-if="isFileLink && fileMissing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e03131" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6" />
+            <line x1="9" y1="13" x2="15" y2="19" />
+            <line x1="15" y1="13" x2="9" y2="19" />
+          </svg>
+          <svg v-else-if="isFileLink" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M5 19a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1" />
             <path d="M20 14H9a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h9l3-5z" />
           </svg>
@@ -235,11 +241,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, inject, onBeforeUnmount, nextTick } from 'vue'
+import { computed, ref, watch, inject, onBeforeUnmount, nextTick } from 'vue'
 import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import type { Note } from '../types/note'
 import { replaceAutoSection, appendAutoSection, getSectionBlocks, setSectionBlocks } from '../utils/autoSections'
+import { showToast, clearToast } from '../stores/toast'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { getStorage } from '../stores/state'
@@ -645,6 +652,13 @@ const isPageLink = computed(() => {
   return !!props.note.link && !isUrlLink.value
 })
 
+const fileMissing = ref(false)
+
+// Reset fileMissing when link changes (e.g. file replacement)
+watch(() => props.note.link, () => {
+  fileMissing.value = false
+})
+
 const linkTitle = computed(() => {
   if (!props.note.link) return ''
   if (isFileLink.value) return `Open folder: ${props.note.link}`
@@ -730,14 +744,22 @@ async function followLink() {
   if (!props.note.link) return
 
   if (isFileLink.value) {
-    // Local path — open containing folder (desktop)
+    // Check file exists before trying to reveal
     const fsPath = toFsPath(props.note.link)
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const exists: boolean = await invoke('path_exists', { path: fsPath })
+      if (!exists) {
+        fileMissing.value = true
+        return
+      }
+    } catch {}
+
+    fileMissing.value = false
     const opened = await showInFolder(fsPath)
     if (!opened) {
-      // Not in desktop app — copy path to clipboard as fallback
       try {
         await navigator.clipboard.writeText(fsPath)
-        // Could show a toast here
       } catch {}
     }
   } else if (isUrlLink.value) {
@@ -786,6 +808,7 @@ const analyzing = ref(false)
 async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
   if (!isFileLink.value || analyzing.value) return
   analyzing.value = true
+  showToast('Analyzing…', 0)
   closeContextMenu()
 
   try {
@@ -802,7 +825,9 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
       unfoldSection('autoBody')
       appStore.updateNote(props.note)
       appStore.pushNotePropertyAction(props.note.id, before, 'Analyze media')
+      fileMissing.value = true
       analyzing.value = false
+      clearToast()
       return
     }
 
@@ -946,6 +971,7 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
 
     // Generate waveform images in background (full analyze only)
     if (mode === 'full' && audioStreams.length > 0) {
+      showToast('Generating waveforms…', 0)
       const noteId = props.note.id
       const filePath = props.note.link!
       const storage = getStorage()
@@ -1039,7 +1065,10 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
             appStore.updateNote(final_)
           }
         }
+        clearToast()
       })()
+    } else {
+      clearToast()
     }
     return // skip the finally block's analyzing=false since we already set it
   } catch (e: any) {
@@ -1058,6 +1087,7 @@ async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
     } catch { /* ignore */ }
   }
   analyzing.value = false
+  clearToast()
 }
 
 function formatFileSize(bytes: number): string {
