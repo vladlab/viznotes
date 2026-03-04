@@ -62,13 +62,13 @@
         class="connector-hit-area"
         @pointerdown.stop="onConnectorPointerDown(handle, $event)"
       />
-      <circle
-        :cx="handle.x"
-        :cy="handle.y"
-        r="10"
-        class="connector-handle"
+      <g
+        class="connector-arrow"
+        :transform="`translate(${handle.x}, ${handle.y}) rotate(${connectorRotation(handle.side)})`"
         @pointerdown.stop="onConnectorPointerDown(handle, $event)"
-      />
+      >
+        <path d="M0 -7 L6 3 L-6 3 Z" fill="var(--accent)" />
+      </g>
     </template>
 
     <!-- Target snap points during drag -->
@@ -291,10 +291,24 @@ function clearRectCache() {
 }
 
 function getNoteRect(noteId: string): NoteRect | null {
-  // During drag, use cache for non-moving notes
-  if (appStore.dragSessionNoteIds.size > 0 && !appStore.dragSessionNoteIds.has(noteId)) {
-    const cached = noteRectCache.get(noteId)
-    if (cached) return cached
+  // During drag: non-moving notes use cache, moving notes compute from data
+  if (appStore.dragSessionNoteIds.size > 0) {
+    if (appStore.dragSessionNoteIds.has(noteId)) {
+      // Dragged note — compute from pos + cached size (no DOM read)
+      const note = appStore.notes.get(noteId)
+      const size = appStore.dragNoteSizeCache.get(noteId)
+      if (note && size) {
+        const t = props.transform
+        const w = size.w / t.scale
+        const h = size.h / t.scale
+        const x = note.pos.x
+        const y = note.pos.y
+        return { id: noteId, x, y, w, h, cx: x + w / 2, cy: y + h / 2 }
+      }
+    } else {
+      const cached = noteRectCache.get(noteId)
+      if (cached) return cached
+    }
   }
 
   const el = document.getElementById(`note-${noteId}`)
@@ -503,10 +517,25 @@ interface ConnectorHandle {
   x: number; y: number
 }
 
+function connectorRotation(side: AnchorSide): number {
+  switch (side) {
+    case 'top':    return 0
+    case 'right':  return 90
+    case 'bottom': return 180
+    case 'left':   return 270
+  }
+}
+
 const connectorHandles = ref<ConnectorHandle[]>([])
 
 watchEffect(() => {
   if (appStore.editingNoteId.value || dragging.active) {
+    connectorHandles.value = []
+    return
+  }
+
+  // Only show connectors for single-note selection
+  if (appStore.selectedNoteIds.size !== 1) {
     connectorHandles.value = []
     return
   }
@@ -522,7 +551,7 @@ watchEffect(() => {
     if (!rect) continue
 
     for (const side of ['top', 'bottom', 'left', 'right'] as AnchorSide[]) {
-      const p = getAnchorPoint(rect, side)
+      const p = getAnchorPoint(rect, side, 20)
       handles.push({ noteId, side, x: p.x, y: p.y })
     }
   }
@@ -833,6 +862,7 @@ function findNoteAtPoint(clientX: number, clientY: number, excludeId: string): s
   transform-origin: 0 0;
   pointer-events: none;
   overflow: visible;
+  will-change: transform;
 }
 
 .arrow-lines-layer {
@@ -868,25 +898,16 @@ function findNoteAtPoint(clientX: number, clientY: number, excludeId: string): s
   pointer-events: auto;
 }
 
-.connector-handle {
-  fill: var(--accent);
-  stroke: var(--bg-app);
-  stroke-width: 2;
+.connector-arrow {
   cursor: crosshair;
   pointer-events: auto;
-  opacity: 0;
-  transition: opacity 0.15s ease, r 0.1s ease;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
 }
 
-.arrow-handles-layer:hover .connector-handle {
-  opacity: 0.8;
-}
-
-.connector-hit-area:hover + .connector-handle,
-.connector-handle:hover {
-  opacity: 1 !important;
-  r: 12;
-  fill: var(--accent-text);
+.connector-hit-area:hover + .connector-arrow,
+.connector-arrow:hover {
+  opacity: 1;
 }
 
 .target-snap-point {

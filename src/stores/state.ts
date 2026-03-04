@@ -59,34 +59,9 @@ export const linkingSourceId = ref<string | null>(null)
 // Set to a note ID to pan the canvas to focus on it, then auto-clears
 export const focusNoteId = ref<string | null>(null)
 
-// Bumped on every drag frame to force arrow recomputation
-export const dragTick = ref(0)
-
 // Container reorder: tracks where a ghost-dragged note would be inserted
 export const dropInsertParentId = ref<string | null>(null)
 export const dropInsertIndex = ref<number>(-1)
-
-// Direct callback for arrow recomputation — set by ArrowLayer
-// Now per-pane: Map of paneId → callback
-const arrowRecomputeCallbacks = new Map<string, () => void>()
-
-export function setArrowRecompute(fn: () => void, paneId?: string) {
-  const id = paneId ?? activePaneId.value
-  if (id) arrowRecomputeCallbacks.set(id, fn)
-}
-
-export function clearArrowRecompute(paneId: string) {
-  arrowRecomputeCallbacks.delete(paneId)
-}
-
-export function triggerArrowRecompute() {
-  dragTick.value++
-  nextTick(() => {
-    requestAnimationFrame(() => {
-      for (const fn of arrowRecomputeCallbacks.values()) fn()
-    })
-  })
-}
 
 // Selection & editing — these globals reflect the ACTIVE pane's state.
 // When active pane changes, we swap the backing data.
@@ -358,6 +333,35 @@ export function removeParents(ids: string[]) {
 // ── Drag session tracking (for arrow rect caching) ──
 
 export const dragSessionNoteIds = reactive(new Set<string>())
+export const dragNoteSizeCache = new Map<string, { w: number; h: number }>()
+
+// ── Arrow recompute ──
+
+const arrowRecomputeCallbacks = new Map<string, () => void>()
+
+export function setArrowRecompute(fn: () => void, paneId?: string) {
+  const id = paneId ?? activePaneId.value
+  if (id) arrowRecomputeCallbacks.set(id, fn)
+}
+
+export function clearArrowRecompute(paneId: string) {
+  arrowRecomputeCallbacks.delete(paneId)
+}
+
+/** Schedule arrow recompute after DOM update (for non-drag callers: undo, align, etc.) */
+export function triggerArrowRecompute() {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      for (const fn of arrowRecomputeCallbacks.values()) fn()
+    })
+  })
+}
+
+/** Synchronous arrow recompute — call from within drag rAF when note positions
+ *  are already updated and rects can be computed from data. */
+export function recomputeArrowsSync() {
+  for (const fn of arrowRecomputeCallbacks.values()) fn()
+}
 
 // ── Page data lifecycle ──
 

@@ -51,6 +51,7 @@ export function useDrag(
     draggedNotes = []
     isSpatialDrag = true
     appStore.dragSessionNoteIds.clear()
+    appStore.dragNoteSizeCache.clear()
     appStore.dropInsertParentId.value = null
     appStore.dropInsertIndex.value = -1
   }
@@ -103,9 +104,18 @@ export function useDrag(
     // Track dragged notes for arrow rect caching (spatial drags only —
     // ghost drags don't move the real DOM element, so arrows stay put)
     appStore.dragSessionNoteIds.clear()
+    appStore.dragNoteSizeCache.clear()
     if (isSpatialDrag) {
       for (const dn of draggedNotes) {
         appStore.dragSessionNoteIds.add(dn.note.id)
+        // Cache DOM size so arrows can compute rects from data during drag
+        const el = document.getElementById(`note-${dn.note.id}`)
+        if (el) {
+          appStore.dragNoteSizeCache.set(dn.note.id, {
+            w: el.offsetWidth,
+            h: el.offsetHeight,
+          })
+        }
       }
     }
 
@@ -143,6 +153,8 @@ export function useDrag(
     }
   }
 
+  let dragFrameCount = 0
+
   function processDragFrame() {
     rafId = null
     const e = pendingEvent
@@ -150,6 +162,7 @@ export function useDrag(
 
     const dx = e.clientX - startClientPos.value.x
     const dy = e.clientY - startClientPos.value.y
+    dragFrameCount++
 
     if (isSpatialDrag) {
       const transform = getTransform()
@@ -161,8 +174,9 @@ export function useDrag(
         dn.note.pos.y = dn.startPos.y + worldDy
       }
 
-      // Trigger arrow recomputation (nextTick + rAF for guaranteed DOM read)
-      appStore.triggerArrowRecompute()
+      // Recompute arrows synchronously — note positions are already updated,
+      // and dragged note rects are computed from data (no DOM read needed)
+      appStore.recomputeArrowsSync()
     } else {
       if (ghostEl) {
         ghostEl.style.left = `${e.clientX}px`
@@ -170,7 +184,11 @@ export function useDrag(
       }
     }
 
-    updateDropTarget(e)
+    // Throttle drop target detection during spatial drag (every 3rd frame);
+    // list drag needs it every frame for responsive reorder feedback
+    if (!isSpatialDrag || dragFrameCount % 3 === 0) {
+      updateDropTarget(e)
+    }
   }
 
   function createGhost(e: PointerEvent) {
