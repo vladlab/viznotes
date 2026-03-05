@@ -64,8 +64,8 @@ export type LoudnessLayout = 'mono' | 'stereo' | '5.1' | '7.1'
 export interface LoudnessGroup {
   name: string
   layout: LoudnessLayout
-  /** Maps speaker position (e.g. 'L', 'R', 'C', 'LFE', 'Ls', 'Rs') to 0-based source channel index */
-  channels: Record<string, number>
+  /** Maps speaker position (e.g. 'L', 'R', 'C') to channel ref "streamIdx:channelIdx" */
+  channels: Record<string, string>
 }
 
 export interface LoudnessConfig {

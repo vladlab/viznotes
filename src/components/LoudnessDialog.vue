@@ -8,17 +8,17 @@
         </div>
 
         <div class="loudness-body">
-          <!-- Stream selector -->
+          <!-- Available channels summary -->
           <div class="loudness-field">
-            <label>Audio stream</label>
-            <select v-model="selectedStreamIdx">
-              <option v-for="(s, idx) in audioStreams" :key="idx" :value="idx">
-                {{ idx }}: {{ s.codec_name }} {{ describeLayout(s) }} ({{ s.channels }}ch)
-              </option>
-            </select>
+            <label>Available channels</label>
+            <div class="channel-summary">
+              <span v-for="ch in allChannels" :key="ch.id" class="channel-tag">
+                {{ ch.label }}
+              </span>
+            </div>
           </div>
 
-          <div v-if="selectedStream" class="loudness-groups">
+          <div class="loudness-groups">
             <div class="loudness-groups-header">
               <span>Channel groups</span>
               <button class="loudness-add-group" @click="addGroup">+ Add group</button>
@@ -43,9 +43,9 @@
                 <div v-for="pos in layoutPositions(group.layout)" :key="pos" class="channel-assign">
                   <label>{{ pos }}</label>
                   <select v-model="group.channels[pos]">
-                    <option :value="-1">—</option>
-                    <option v-for="ch in channelCount" :key="ch - 1" :value="ch - 1">
-                      Ch {{ ch }}
+                    <option value="">—</option>
+                    <option v-for="ch in allChannels" :key="ch.id" :value="ch.id">
+                      {{ ch.label }}
                     </option>
                   </select>
                 </div>
@@ -53,9 +53,14 @@
 
               <!-- Result display -->
               <div v-if="results[gIdx]" class="group-result">
-                <span class="result-value">{{ results[gIdx].input_i }} LUFS</span>
-                <span class="result-value">{{ results[gIdx].input_tp }} dBTP</span>
-                <span class="result-value">LRA {{ results[gIdx].input_lra }} LU</span>
+                <template v-if="results[gIdx].error">
+                  <span class="result-error">⚠ {{ results[gIdx].error }}</span>
+                </template>
+                <template v-else>
+                  <span class="result-value">{{ results[gIdx].input_i }} LUFS</span>
+                  <span class="result-value">{{ results[gIdx].input_tp }} dBTP</span>
+                  <span class="result-value">LRA {{ results[gIdx].input_lra }} LU</span>
+                </template>
               </div>
             </div>
           </div>
@@ -92,14 +97,10 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-const selectedStreamIdx = ref(0)
 const groups = reactive<LoudnessGroup[]>([])
 const results = reactive<Record<number, any>>({})
 const analyzing = ref(false)
 const status = ref('')
-
-const selectedStream = computed(() => props.audioStreams[selectedStreamIdx.value])
-const channelCount = computed(() => parseInt(selectedStream.value?.channels || '2', 10))
 
 // Speaker position → FFmpeg channel name
 const POS_TO_FFMPEG: Record<string, string> = {
@@ -108,27 +109,64 @@ const POS_TO_FFMPEG: Record<string, string> = {
   'Lrs': 'SL', 'Rrs': 'SR',
 }
 
-function describeLayout(stream: any): string {
-  const layout = stream.channel_layout
-  if (layout && layout !== 'unknown') return layout
-  return `${stream.channels}ch`
+// ── Flat channel list across all streams ──
+
+interface ChannelRef {
+  id: string          // "0:0", "0:1", "1:0", etc.
+  streamIdx: number
+  channelIdx: number
+  label: string       // "S0 Ch1 (aac stereo)" etc.
 }
+
+const allChannels = computed<ChannelRef[]>(() => {
+  const list: ChannelRef[] = []
+  for (let si = 0; si < props.audioStreams.length; si++) {
+    const s = props.audioStreams[si]
+    const chCount = parseInt(s.channels || '0', 10)
+    const codec = s.codec_name || '?'
+    const layout = s.channel_layout && s.channel_layout !== 'unknown' ? s.channel_layout : `${chCount}ch`
+    for (let ci = 0; ci < chCount; ci++) {
+      list.push({
+        id: `${si}:${ci}`,
+        streamIdx: si,
+        channelIdx: ci,
+        label: `S${si} Ch${ci + 1} (${codec} ${layout})`,
+      })
+    }
+  }
+  return list
+})
 
 function layoutPositions(layout: LoudnessLayout): string[] {
   return LOUDNESS_LAYOUTS[layout] || []
 }
 
-function addGroup() {
-  const nextCh = groups.reduce((max, g) => {
-    const vals = Object.values(g.channels).filter(v => v >= 0)
-    return Math.max(max, ...vals.map(v => v + 1))
-  }, 0)
+// ── Group management ──
 
-  const layout: LoudnessLayout = channelCount.value >= 6 ? '5.1' : channelCount.value >= 2 ? 'stereo' : 'mono'
+function addGroup() {
+  // Collect all channel IDs already assigned in existing groups
+  const used = new Set<string>()
+  for (const g of groups) {
+    for (const v of Object.values(g.channels)) {
+      if (v) used.add(v)
+    }
+  }
+
+  // Find next unassigned channels
+  const available = allChannels.value.filter(ch => !used.has(ch.id))
+  const remaining = available.length
+
+  // Pick layout based on remaining channels
+  let layout: LoudnessLayout
+  if (remaining >= 8) layout = '7.1'
+  else if (remaining >= 6) layout = '5.1'
+  else if (remaining >= 2) layout = 'stereo'
+  else layout = 'mono'
+
   const positions = LOUDNESS_LAYOUTS[layout]
-  const channels: Record<string, number> = {}
+  const channels: Record<string, string> = {}
   positions.forEach((pos, i) => {
-    channels[pos] = nextCh + i < channelCount.value ? nextCh + i : -1
+    channels[pos] = i < available.length ? available[i].id : ''
   })
 
   groups.push({
@@ -141,23 +179,48 @@ function addGroup() {
 function onLayoutChange(group: LoudnessGroup) {
   const positions = LOUDNESS_LAYOUTS[group.layout]
   const oldChannels = { ...group.channels }
-  const newChannels: Record<string, number> = {}
+  const oldValues = Object.values(oldChannels).filter(v => v)
+  const newChannels: Record<string, string> = {}
   positions.forEach((pos, i) => {
-    newChannels[pos] = oldChannels[pos] ?? (i < channelCount.value ? i : -1)
+    // Keep existing assignment if position name matches, otherwise reuse by index
+    newChannels[pos] = oldChannels[pos] ?? (i < oldValues.length ? oldValues[i] : '')
   })
   group.channels = newChannels
 }
 
-function buildFilterChain(group: LoudnessGroup): string {
-  const positions = LOUDNESS_LAYOUTS[group.layout]
-  const layoutStr = group.layout === '7.1' ? '7.1' : group.layout === '5.1' ? '5.1' : group.layout
-  const panParts = positions
-    .filter(pos => (group.channels[pos] ?? -1) >= 0)
-    .map(pos => `${POS_TO_FFMPEG[pos] || pos}=c${group.channels[pos]}`)
+// ── Build FFmpeg filter chain ──
 
-  if (panParts.length === 0) return 'loudnorm=print_format=json'
-  return `pan=${layoutStr}|${panParts.join('|')},loudnorm=print_format=json`
+function buildFilterChain(group: LoudnessGroup): { streamIdx: number; filter: string } | null {
+  const positions = LOUDNESS_LAYOUTS[group.layout]
+  const assignments = positions
+    .map(pos => ({ pos, ref: group.channels[pos] }))
+    .filter(a => a.ref)
+
+  if (assignments.length === 0) return null
+
+  // Parse channel refs — all must be from the same stream for now
+  const parsed = assignments.map(a => {
+    const [si, ci] = a.ref.split(':').map(Number)
+    return { pos: a.pos, streamIdx: si, channelIdx: ci }
+  })
+
+  const streams = new Set(parsed.map(p => p.streamIdx))
+  if (streams.size > 1) {
+    // Multi-stream groups need filter_complex with amerge — not supported yet
+    return null
+  }
+
+  const streamIdx = parsed[0].streamIdx
+  const panParts = parsed.map(p =>
+    `${POS_TO_FFMPEG[p.pos] || p.pos}=c${p.channelIdx}`
+  )
+
+  const layoutStr = group.layout
+  const filter = `pan=${layoutStr}|${panParts.join('|')},loudnorm=print_format=json`
+  return { streamIdx, filter }
 }
+
+// ── Run analysis ──
 
 async function runAnalysis() {
   if (groups.length === 0) return
@@ -171,13 +234,17 @@ async function runAnalysis() {
       const group = groups[i]
       status.value = `Analyzing ${group.name}…`
 
-      const filterChain = buildFilterChain(group)
+      const chain = buildFilterChain(group)
+      if (!chain) {
+        results[i] = { error: 'No channels assigned or mixed streams (not yet supported)' }
+        continue
+      }
 
       try {
         const jsonStr = await invoke<string>('run_loudnorm', {
           filePath,
-          streamIndex: selectedStreamIdx.value,
-          filterChain,
+          streamIndex: chain.streamIdx,
+          filterChain: chain.filter,
         })
         results[i] = JSON.parse(jsonStr)
       } catch (e) {
@@ -189,19 +256,13 @@ async function runAnalysis() {
     // Save config to note
     const before = history.snapshotNote(appStore.notes, props.note.id)!
     const config: LoudnessConfig = {
-      streamIndex: selectedStreamIdx.value,
+      streamIndex: 0, // legacy field, ignored in new model
       groups: groups.map(g => ({ ...g, channels: { ...g.channels } })),
     }
-    if (!props.note.loudnessConfig) props.note.loudnessConfig = []
-    // Replace config for this stream, keep others
-    const otherConfigs = props.note.loudnessConfig.filter(c => c.streamIndex !== selectedStreamIdx.value)
-    props.note.loudnessConfig = [...otherConfigs, config]
+    props.note.loudnessConfig = [config]
 
     // Write results to Analysis section
-    const blocks: any[] = [{
-      type: 'paragraph',
-      content: [{ type: 'text', text: '── Loudness ──', marks: [{ type: 'bold' }] }],
-    }]
+    const blocks: any[] = []
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]
@@ -231,12 +292,12 @@ async function runAnalysis() {
   }
 }
 
-// Load existing config on mount
+// ── Load existing config on mount ──
+
 onMounted(() => {
-  if (props.note.loudnessConfig) {
+  if (props.note.loudnessConfig?.length) {
     const existing = props.note.loudnessConfig[0]
-    if (existing) {
-      selectedStreamIdx.value = existing.streamIndex
+    if (existing?.groups) {
       groups.splice(0, groups.length, ...existing.groups.map(g => ({
         ...g,
         channels: { ...g.channels },
@@ -261,7 +322,7 @@ onMounted(() => {
   background: var(--bg-surface);
   border: 1px solid var(--border-main);
   border-radius: 8px;
-  width: 520px;
+  width: 560px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -319,13 +380,18 @@ onMounted(() => {
   color: var(--text-faint);
 }
 
-.loudness-field select {
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
-  border-radius: 4px;
-  padding: 6px 8px;
-  color: var(--text-primary);
-  font-size: 0.88em;
+.channel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.channel-tag {
+  font-size: 0.75em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
 }
 
 .loudness-groups-header {
@@ -412,7 +478,7 @@ onMounted(() => {
 
 .channel-map {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 4px 8px;
 }
 
@@ -437,7 +503,7 @@ onMounted(() => {
   border-radius: 3px;
   padding: 2px 4px;
   color: var(--text-primary);
-  font-size: 0.82em;
+  font-size: 0.78em;
 }
 
 .group-result {
@@ -452,6 +518,11 @@ onMounted(() => {
   font-size: 0.82em;
   font-weight: 600;
   color: var(--accent-text);
+}
+
+.result-error {
+  font-size: 0.82em;
+  color: var(--danger-text);
 }
 
 .loudness-footer {
