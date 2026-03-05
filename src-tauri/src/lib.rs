@@ -1,7 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tauri::{Manager, Emitter};
 use base64::Engine;
+
+/// PID of the currently running loudnorm FFmpeg process (0 = none).
+static LOUDNORM_PID: AtomicU32 = AtomicU32::new(0);
 
 /// Get the config file path inside app config dir (~/.config/ on Linux)
 fn config_path(app: &tauri::AppHandle) -> PathBuf {
@@ -215,36 +219,141 @@ fn generate_waveform(
     }
 }
 
-/// Run loudnorm analysis using a filter_complex graph.
-/// The filter_complex string handles stream selection, amerge, pan, and loudnorm.
-/// Returns the JSON output from loudnorm (extracted from ffmpeg's stderr).
+/// Kill a running loudnorm FFmpeg process.
 #[tauri::command]
-fn run_loudnorm(file_path: String, filter_complex: String) -> Result<String, String> {
-    let output = std::process::Command::new("ffmpeg")
-        .args([
-            "-i", &file_path,
-            "-filter_complex", &filter_complex,
-            "-f", "null",
-            "-",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
+fn cancel_loudnorm() -> Result<(), String> {
+    let pid = LOUDNORM_PID.swap(0, Ordering::SeqCst);
+    if pid != 0 {
+        // Send SIGKILL on unix, TerminateProcess on windows
+        let _ = std::process::Command::new("kill")
+            .arg("-9")
+            .arg(pid.to_string())
+            .status();
+    }
+    Ok(())
+}
 
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+/// Run loudnorm analysis for one or more channel groups in a single FFmpeg pass.
+/// filter_complex: combined graph with named outputs (e.g. "[out0]", "[out1]")
+/// map_args: output labels to map (e.g. ["[out0]", "[out1]"])
+/// duration_secs: total file duration for progress reporting
+/// Returns a JSON array of loudnorm result objects, one per group.
+#[tauri::command]
+fn run_loudnorm(
+    app: tauri::AppHandle,
+    file_path: String,
+    filter_complex: String,
+    map_args: Vec<String>,
+    duration_secs: f64,
+) -> Result<String, String> {
+    use std::io::Read;
 
-    // loudnorm prints JSON to stderr. Find the last { ... } block.
-    if let Some(json_start) = stderr.rfind('{') {
-        if let Some(json_end) = stderr[json_start..].rfind('}') {
-            let json_str = &stderr[json_start..json_start + json_end + 1];
-            // Validate it parses as JSON
-            if json_str.contains("input_i") {
-                return Ok(json_str.to_string());
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.args(["-i", &file_path, "-filter_complex", &filter_complex]);
+    for m in &map_args {
+        cmd.args(["-map", m]);
+    }
+    cmd.args(["-f", "null", "-"]);
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::null());
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
+    LOUDNORM_PID.store(child.id(), Ordering::SeqCst);
+
+    let mut stderr_pipe = child.stderr.take().ok_or("No stderr pipe")?;
+
+    let mut full_stderr = String::new();
+    let mut buf = [0u8; 4096];
+
+    loop {
+        // Check if cancelled
+        if LOUDNORM_PID.load(Ordering::SeqCst) == 0 {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Cancelled".to_string());
+        }
+
+        match stderr_pipe.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                full_stderr.push_str(&chunk);
+
+                // Parse progress from "time=HH:MM:SS.ss"
+                if duration_secs > 0.0 {
+                    if let Some(idx) = chunk.rfind("time=") {
+                        let after = &chunk[idx + 5..];
+                        let end = after.find(|c: char| c == ' ' || c == '\r' || c == '\n')
+                            .unwrap_or(after.len());
+                        let time_str = &after[..end];
+                        if let Some(secs) = parse_ffmpeg_time(time_str) {
+                            let pct = (secs / duration_secs * 100.0).min(100.0);
+                            let _ = app.emit("loudnorm-progress", pct);
+                        }
+                    }
+                }
             }
+            Err(_) => break,
         }
     }
 
-    // If we can't find JSON, return stderr for debugging
-    Err(format!("Could not parse loudnorm output: {}", stderr))
+    // Check if cancelled (PID was zeroed by cancel_loudnorm)
+    let was_cancelled = LOUDNORM_PID.swap(0, Ordering::SeqCst) == 0;
+    let _ = child.wait();
+    if was_cancelled {
+        return Err("Cancelled".to_string());
+    }
+    let _ = app.emit("loudnorm-progress", 100.0_f64);
+
+    // Extract all JSON blocks containing "input_i" (one per loudnorm instance)
+    let blocks = extract_loudnorm_json(&full_stderr);
+    if blocks.is_empty() {
+        return Err(format!("No loudnorm results found. stderr: {}", 
+            &full_stderr[full_stderr.len().saturating_sub(500)..]));
+    }
+
+    Ok(format!("[{}]", blocks.join(",")))
+}
+
+fn parse_ffmpeg_time(s: &str) -> Option<f64> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() == 3 {
+        let h: f64 = parts[0].parse().ok()?;
+        let m: f64 = parts[1].parse().ok()?;
+        let s: f64 = parts[2].parse().ok()?;
+        Some(h * 3600.0 + m * 60.0 + s)
+    } else {
+        None
+    }
+}
+
+fn extract_loudnorm_json(stderr: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut depth = 0i32;
+    let mut start: Option<usize> = None;
+
+    for (i, c) in stderr.char_indices() {
+        match c {
+            '{' => {
+                if depth == 0 { start = Some(i); }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(s) = start {
+                        let block = &stderr[s..=i];
+                        if block.contains("input_i") {
+                            blocks.push(block.to_string());
+                        }
+                    }
+                    start = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    blocks
 }
 
 #[tauri::command]
@@ -422,6 +531,7 @@ pub fn run() {
             run_ffprobe,
             generate_waveform,
             run_loudnorm,
+            cancel_loudnorm,
             show_in_folder,
             save_asset,
             read_asset,

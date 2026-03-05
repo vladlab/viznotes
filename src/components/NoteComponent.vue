@@ -246,6 +246,7 @@
       v-if="loudnessDialogVisible"
       :note="note"
       :audioStreams="loudnessStreams"
+      :duration="loudnessDuration"
       @close="loudnessDialogVisible = false"
     />
   </div>
@@ -814,6 +815,7 @@ function onDelete() {
 const analyzing = ref(false)
 const loudnessDialogVisible = ref(false)
 const loudnessStreams = ref<any[]>([])
+const loudnessDuration = ref(0)
 
 async function openLoudnessDialog() {
   closeContextMenu()
@@ -833,6 +835,7 @@ async function openLoudnessDialog() {
       return
     }
     loudnessStreams.value = audioStreams
+    loudnessDuration.value = parseFloat(data.format?.duration || '0')
     loudnessDialogVisible.value = true
   } catch (e) {
     console.error('Failed to probe for loudness:', e)

@@ -8,7 +8,7 @@
         </div>
 
         <div class="loudness-body">
-          <!-- Available channels summary -->
+          <!-- Available channels -->
           <div class="loudness-field">
             <label>Available channels</label>
             <div class="channel-summary">
@@ -67,13 +67,24 @@
         </div>
 
         <div class="loudness-footer">
-          <span v-if="status" class="loudness-status">{{ status }}</span>
-          <div class="loudness-actions">
-            <button @click="$emit('close')">Cancel</button>
-            <button class="primary" @click="runAnalysis" :disabled="analyzing || groups.length === 0">
-              {{ analyzing ? 'Analyzing…' : 'Analyze' }}
-            </button>
-          </div>
+          <template v-if="analyzing">
+            <div class="loudness-progress-bar">
+              <div class="loudness-progress-fill" :style="{ width: `${progress}%` }" />
+            </div>
+            <div class="loudness-analyzing-row">
+              <span class="loudness-status">{{ status }} — {{ Math.round(progress) }}%</span>
+              <button class="loudness-cancel-btn" @click="cancelAnalysis">Cancel</button>
+            </div>
+          </template>
+          <template v-else>
+            <span v-if="status" class="loudness-status">{{ status }}</span>
+            <div class="loudness-actions">
+              <button @click="$emit('close')">Close</button>
+              <button class="primary" @click="runAnalysis" :disabled="groups.length === 0">
+                Analyze
+              </button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -81,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { Note, LoudnessGroup, LoudnessConfig, LoudnessLayout } from '../types/note'
 import { LOUDNESS_LAYOUTS } from '../types/note'
 import { replaceAutoSection } from '../utils/autoSections'
@@ -91,6 +102,7 @@ import { history } from '../stores/history'
 const props = defineProps<{
   note: Note
   audioStreams: any[]
+  duration: number // seconds
 }>()
 
 const emit = defineEmits<{
@@ -100,7 +112,9 @@ const emit = defineEmits<{
 const groups = reactive<LoudnessGroup[]>([])
 const results = reactive<Record<number, any>>({})
 const analyzing = ref(false)
+const progress = ref(0)
 const status = ref('')
+let unlistenProgress: (() => void) | null = null
 
 // Speaker position → FFmpeg channel name
 const POS_TO_FFMPEG: Record<string, string> = {
@@ -112,10 +126,10 @@ const POS_TO_FFMPEG: Record<string, string> = {
 // ── Flat channel list across all streams ──
 
 interface ChannelRef {
-  id: string          // "0:0", "0:1", "1:0", etc.
+  id: string
   streamIdx: number
   channelIdx: number
-  shortLabel: string  // "S0 Ch1" for multi-ch streams, "S0" for mono
+  shortLabel: string
 }
 
 const allChannels = computed<ChannelRef[]>(() => {
@@ -182,9 +196,14 @@ function onLayoutChange(group: LoudnessGroup) {
   group.channels = newChannels
 }
 
-// ── Build FFmpeg filter_complex ──
+// ── Build combined filter_complex for all groups ──
 
-function buildFilterComplex(group: LoudnessGroup): string | null {
+interface GroupFilter {
+  filterStr: string
+  outputLabel: string
+}
+
+function buildGroupFilter(group: LoudnessGroup, idx: number): GroupFilter | null {
   const positions = LOUDNESS_LAYOUTS[group.layout]
   const assignments = positions
     .map(pos => ({ pos, ref: group.channels[pos] }))
@@ -197,23 +216,22 @@ function buildFilterComplex(group: LoudnessGroup): string | null {
     return { pos: a.pos, streamIdx: si, channelIdx: ci }
   })
 
-  // Collect unique streams in order
-  const streamSet = new Map<number, number>() // streamIdx → index in amerge output
+  // Collect unique streams
   const streamOrder: number[] = []
+  const streamSet = new Set<number>()
   for (const p of parsed) {
     if (!streamSet.has(p.streamIdx)) {
-      streamSet.set(p.streamIdx, streamOrder.length)
+      streamSet.add(p.streamIdx)
       streamOrder.push(p.streamIdx)
     }
   }
 
-  // For each stream, figure out its channel count for offset calculation
-  const streamChannelCounts: number[] = streamOrder.map(si =>
+  // Channel counts per stream for offset computation
+  const streamChannelCounts = streamOrder.map(si =>
     parseInt(props.audioStreams[si]?.channels || '1', 10)
   )
 
-  // Compute each channel's index in the amerge output
-  // amerge concatenates channels: stream0_ch0, stream0_ch1, ..., stream1_ch0, ...
+  // Offsets in amerge output
   const streamOffsets = new Map<number, number>()
   let offset = 0
   for (let i = 0; i < streamOrder.length; i++) {
@@ -221,50 +239,105 @@ function buildFilterComplex(group: LoudnessGroup): string | null {
     offset += streamChannelCounts[i]
   }
 
-  // Build input labels and amerge
   const inputs = streamOrder.map(si => `[0:a:${si}]`).join('')
   const needsMerge = streamOrder.length > 1
   const mergeFilter = needsMerge ? `amerge=inputs=${streamOrder.length},` : ''
 
-  // Build pan assignments using amerge output channel indices
   const panParts = parsed.map(p => {
     const mergedIdx = streamOffsets.get(p.streamIdx)! + p.channelIdx
     return `${POS_TO_FFMPEG[p.pos] || p.pos}=c${mergedIdx}`
   })
 
-  const layoutStr = group.layout
-  return `${inputs}${mergeFilter}pan=${layoutStr}|${panParts.join('|')},loudnorm=print_format=json`
+  const outputLabel = `out${idx}`
+  const filterStr = `${inputs}${mergeFilter}pan=${group.layout}|${panParts.join('|')},loudnorm=print_format=json[${outputLabel}]`
+
+  return { filterStr, outputLabel }
 }
 
 // ── Run analysis ──
 
+async function cancelAnalysis() {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('cancel_loudnorm')
+  } catch {}
+  // The running invoke will reject with "Cancelled", handled in runAnalysis catch
+}
+
 async function runAnalysis() {
   if (groups.length === 0) return
   analyzing.value = true
+  progress.value = 0
+
+  // Clear previous results
+  for (const k of Object.keys(results)) delete results[k as any]
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
+    const { listen } = await import('@tauri-apps/api/event')
     const filePath = props.note.link!
 
+    // Listen for progress events
+    unlistenProgress = await listen<number>('loudnorm-progress', (event) => {
+      progress.value = event.payload
+    })
+
+    // Build combined filter_complex
+    const filters: GroupFilter[] = []
+    const groupErrors: Record<number, string> = {}
+
     for (let i = 0; i < groups.length; i++) {
-      const group = groups[i]
-      status.value = `Analyzing ${group.name}…`
-
-      const filterComplex = buildFilterComplex(group)
-      if (!filterComplex) {
-        results[i] = { error: 'No channels assigned' }
-        continue
+      const f = buildGroupFilter(groups[i], i)
+      if (f) {
+        filters.push(f)
+      } else {
+        groupErrors[i] = 'No channels assigned'
       }
+    }
 
-      try {
-        const jsonStr = await invoke<string>('run_loudnorm', {
-          filePath,
-          filterComplex,
-        })
-        results[i] = JSON.parse(jsonStr)
-      } catch (e) {
-        console.error(`Loudness analysis failed for ${group.name}:`, e)
-        results[i] = { error: String(e) }
+    if (filters.length === 0) {
+      for (const [i, err] of Object.entries(groupErrors)) {
+        results[Number(i)] = { error: err }
+      }
+      return
+    }
+
+    const filterComplex = filters.map(f => f.filterStr).join(';')
+    const mapArgs = filters.map(f => `[${f.outputLabel}]`)
+
+    status.value = `Analyzing ${filters.length} group${filters.length > 1 ? 's' : ''}…`
+
+    try {
+      const jsonStr = await invoke<string>('run_loudnorm', {
+        filePath,
+        filterComplex,
+        mapArgs,
+        durationSecs: props.duration || 0,
+      })
+
+      const resultArray = JSON.parse(jsonStr)
+
+      // Map results back — filters are in order, skipping errored groups
+      let resultIdx = 0
+      for (let i = 0; i < groups.length; i++) {
+        if (groupErrors[i]) {
+          results[i] = { error: groupErrors[i] }
+        } else if (resultIdx < resultArray.length) {
+          results[i] = resultArray[resultIdx]
+          resultIdx++
+        }
+      }
+    } catch (e) {
+      const msg = String(e)
+      if (msg.includes('Cancelled')) {
+        status.value = 'Cancelled'
+        return  // Don't save partial results
+      }
+      console.error('Loudness analysis failed:', e)
+      for (let i = 0; i < groups.length; i++) {
+        if (!groupErrors[i]) {
+          results[i] = { error: msg }
+        }
       }
     }
 
@@ -278,7 +351,6 @@ async function runAnalysis() {
 
     // Write results to Analysis section
     const blocks: any[] = []
-
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i]
       const r = results[i]
@@ -301,11 +373,25 @@ async function runAnalysis() {
 
     status.value = 'Done'
   } catch (e) {
-    status.value = `Error: ${e}`
+    const msg = String(e)
+    if (!msg.includes('Cancelled')) {
+      status.value = `Error: ${e}`
+    }
   } finally {
     analyzing.value = false
+    if (unlistenProgress) { unlistenProgress(); unlistenProgress = null }
   }
 }
+
+onBeforeUnmount(async () => {
+  if (unlistenProgress) { unlistenProgress(); unlistenProgress = null }
+  if (analyzing.value) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('cancel_loudnorm')
+    } catch {}
+  }
+})
 
 // ── Load existing config on mount ──
 
@@ -352,228 +438,137 @@ onMounted(() => {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.loudness-header h3 {
-  margin: 0;
-  font-size: 0.95em;
-  font-weight: 600;
-}
+.loudness-header h3 { margin: 0; font-size: 0.95em; font-weight: 600; }
 
 .loudness-close {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 1.4em;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
+  background: none; border: none; color: var(--text-muted);
+  font-size: 1.4em; cursor: pointer; padding: 0 4px; line-height: 1;
 }
-
 .loudness-close:hover { color: var(--text-primary); }
 
 .loudness-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex: 1; overflow-y: auto; padding: 12px 16px;
+  display: flex; flex-direction: column; gap: 12px;
 }
 
 .loudness-field label {
-  font-size: 0.72em;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  display: block;
-  margin-bottom: 4px;
+  font-size: 0.72em; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-faint); display: block; margin-bottom: 4px;
 }
 
-.channel-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
+.channel-summary { display: flex; flex-wrap: wrap; gap: 3px; }
 
 .channel-tag {
-  font-size: 0.72em;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--bg-surface-hover);
-  color: var(--text-secondary);
+  font-size: 0.72em; padding: 1px 5px; border-radius: 3px;
+  background: var(--bg-surface-hover); color: var(--text-secondary);
 }
 
 .loudness-groups-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
 }
-
 .loudness-groups-header span {
-  font-size: 0.72em;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
+  font-size: 0.72em; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-faint);
 }
 
 .loudness-add-group {
-  background: none;
-  border: 1px solid var(--border-input);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 0.78em;
-  color: var(--text-secondary);
-  cursor: pointer;
+  background: none; border: 1px solid var(--border-input); border-radius: 4px;
+  padding: 2px 8px; font-size: 0.78em; color: var(--text-secondary); cursor: pointer;
 }
-
 .loudness-add-group:hover { background: var(--bg-surface-hover); }
 
-.loudness-empty {
-  font-size: 0.8em;
-  color: var(--text-faint);
-  padding: 6px 0;
-}
+.loudness-empty { font-size: 0.8em; color: var(--text-faint); padding: 6px 0; }
 
 .loudness-group {
-  background: var(--bg-app);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin-top: 6px;
+  background: var(--bg-app); border: 1px solid var(--border-subtle);
+  border-radius: 6px; padding: 8px 10px; margin-top: 6px;
 }
 
-.group-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
+.group-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 
 .group-name-input {
-  flex: 1;
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
-  border-radius: 3px;
-  padding: 3px 6px;
-  color: var(--text-primary);
-  font-size: 0.82em;
+  flex: 1; background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: 3px; padding: 3px 6px; color: var(--text-primary); font-size: 0.82em;
 }
-
 .group-header select {
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
-  border-radius: 3px;
-  padding: 3px 6px;
-  color: var(--text-primary);
-  font-size: 0.82em;
-  width: 70px;
+  background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: 3px; padding: 3px 6px; color: var(--text-primary); font-size: 0.82em; width: 70px;
 }
-
 .group-remove {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 1.1em;
-  cursor: pointer;
-  padding: 0 2px;
-  line-height: 1;
+  background: none; border: none; color: var(--text-muted);
+  font-size: 1.1em; cursor: pointer; padding: 0 2px; line-height: 1;
 }
-
 .group-remove:hover { color: var(--danger-text); }
 
-.channel-map {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+.channel-map { display: flex; flex-wrap: wrap; gap: 4px; }
 
-.channel-assign {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
+.channel-assign { display: flex; align-items: center; gap: 3px; }
 
 .channel-pos {
-  font-size: 0.72em;
-  font-weight: 700;
-  color: var(--text-secondary);
-  width: 22px;
-  text-align: right;
-  flex-shrink: 0;
+  font-size: 0.72em; font-weight: 700; color: var(--text-secondary);
+  width: 22px; text-align: right; flex-shrink: 0;
 }
-
 .channel-assign select {
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
-  border-radius: 3px;
-  padding: 2px 3px;
-  color: var(--text-primary);
-  font-size: 0.75em;
-  width: 58px;
+  background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: 3px; padding: 2px 3px; color: var(--text-primary);
+  font-size: 0.75em; width: 58px;
 }
 
 .group-result {
-  display: flex;
-  gap: 10px;
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px solid var(--border-subtle);
+  display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px;
+  padding-top: 5px; border-top: 1px solid var(--border-subtle);
 }
-
-.result-value {
-  font-size: 0.8em;
-  font-weight: 600;
-  color: var(--accent-text);
-}
-
-.result-error {
-  font-size: 0.8em;
-  color: var(--danger-text);
-}
+.result-value { font-size: 0.8em; font-weight: 600; color: var(--accent-text); }
+.result-error { font-size: 0.8em; color: var(--danger-text); }
 
 .loudness-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  border-top: 1px solid var(--border-subtle);
-  gap: 8px;
+  padding: 8px 16px; border-top: 1px solid var(--border-subtle);
+}
+
+.loudness-progress-bar {
+  width: 100%; height: 4px; background: var(--border-subtle);
+  border-radius: 2px; overflow: hidden; margin-bottom: 8px;
+}
+.loudness-progress-fill {
+  height: 100%; background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.loudness-analyzing-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+
+.loudness-cancel-btn {
+  padding: 6px 24px; border-radius: 4px;
+  border: 1px solid var(--danger-text, #e03131);
+  background: transparent;
+  color: var(--danger-text, #e03131);
+  font-size: 0.88em; font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.loudness-cancel-btn:hover {
+  background: color-mix(in srgb, var(--danger-text, #e03131) 15%, transparent);
 }
 
 .loudness-status {
-  font-size: 0.78em;
-  color: var(--text-faint);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.78em; color: var(--text-faint); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .loudness-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+  display: flex; gap: 6px; flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .loudness-actions button {
-  padding: 5px 14px;
-  border-radius: 4px;
-  border: 1px solid var(--border-input);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font-size: 0.82em;
-  cursor: pointer;
+  padding: 5px 14px; border-radius: 4px; border: 1px solid var(--border-input);
+  background: var(--bg-input); color: var(--text-primary); font-size: 0.82em; cursor: pointer;
 }
-
 .loudness-actions button:hover { background: var(--bg-surface-hover); }
-
 .loudness-actions button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
+  background: var(--accent); border-color: var(--accent); color: white;
 }
-
 .loudness-actions button.primary:hover { filter: brightness(1.1); }
 .loudness-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
