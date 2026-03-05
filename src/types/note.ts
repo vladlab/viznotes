@@ -80,6 +80,7 @@ export interface Note {
 
   collapsed: boolean
   foldState: NoteFoldState
+  linkOrder: string[]  // ordered link IDs for display in Links section
   movable: boolean
   resizable: boolean
 
@@ -134,6 +135,7 @@ export function createDefaultNote(
 
     collapsed: false,
     foldState: { autoBody: false, body: false, container: false, links: false },
+    linkOrder: [],
     movable: true,
     resizable: true,
 

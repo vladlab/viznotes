@@ -230,6 +230,7 @@
           </button>
         </template>
         <div class="context-separator" />
+        <button @click="togglePin">{{ isPinned ? 'Unpin note' : 'Pin note' }}</button>
         <button @click="startLinkFromHere">Create link…</button>
         <button v-if="!note.link" @click="convertToPage">Convert to page</button>
         <div class="context-separator" />
@@ -246,6 +247,7 @@ import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../t
 import type { Note } from '../types/note'
 import { replaceAutoSection, appendAutoSection, getSectionBlocks, setSectionBlocks, noteHasAutoBody } from '../utils/autoSections'
 import { showToast, clearToast } from '../stores/toast'
+import { pinNote, unpinNote, isNotePinned } from '../stores/pinned'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { getStorage } from '../stores/state'
@@ -788,6 +790,17 @@ async function followLink() {
 function startLinkFromHere() {
   closeContextMenu()
   appStore.startLinking(props.note.id)
+}
+
+const isPinned = computed(() => isNotePinned(props.note.id))
+
+function togglePin() {
+  if (isPinned.value) {
+    unpinNote(props.note.id)
+  } else {
+    pinNote(props.note.id)
+  }
+  closeContextMenu()
 }
 
 function onDelete() {

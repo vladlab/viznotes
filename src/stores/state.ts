@@ -386,6 +386,9 @@ export function loadPageData(
         links: note.collapsed ?? false,
       }
     }
+    if (!note.linkOrder) {
+      note.linkOrder = []
+    }
     notes.set(note.id, note)
   }
   for (const arrow of pageArrows) arrows.set(arrow.id, arrow)

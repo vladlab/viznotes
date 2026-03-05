@@ -1,6 +1,7 @@
 <template>
   <div class="app-layout" v-if="ready">
     <Sidebar />
+    <PinnedPanel />
     <main class="main-content">
       <Breadcrumbs />
       <FormatBar v-if="appStore.currentPage.value" />
@@ -46,6 +47,7 @@ import Sidebar from './components/Sidebar.vue'
 import Breadcrumbs from './components/Breadcrumbs.vue'
 import FormatBar from './components/FormatBar.vue'
 import SplitView from './components/SplitView.vue'
+import PinnedPanel from './components/PinnedPanel.vue'
 import VaultPicker from './components/VaultPicker.vue'
 import { appStore } from './stores/app'
 import { initPrimaryPane, panes } from './stores/panes'

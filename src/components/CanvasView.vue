@@ -184,6 +184,7 @@ import { getStorage, loadedPages, getRootNotesForPage, clearArrowRecompute } fro
 import { panes, setActivePane } from '../stores/panes'
 import { settings } from '../stores/settings'
 import { loadUserTheme } from '../utils/themeLoader'
+import { isLocalPath, toFsPath } from '../utils/platform'
 import NoteComponent from './NoteComponent.vue'
 import ArrowLayer from './ArrowLayer.vue'
 
@@ -1266,49 +1267,42 @@ async function exportSelectedNotes() {
  */
 async function exportFileTable() {
   const selectedIds = Array.from(appStore.selectedNoteIds)
-  if (selectedIds.length === 0) return
+  if (selectedIds.length === 0) {
+    showToast('No notes selected')
+    return
+  }
 
-  // Filter to file notes, sort spatially
-  const fileNotes = selectedIds
-    .map(id => appStore.notes.get(id))
-    .filter(n => n && n.link && !n.link.startsWith('page:')) as any[]
+  const filePaths: string[] = []
+  const seen = new Set<string>()
 
-  if (fileNotes.length === 0) return
+  for (const id of selectedIds) {
+    const note = appStore.notes.get(id)
+    if (!note) continue
 
-  fileNotes.sort((a, b) => {
-    const rowDiff = a.pos.y - b.pos.y
-    if (Math.abs(rowDiff) > 50) return rowDiff
-    return a.pos.x - b.pos.x
-  })
+    if (note.link && isLocalPath(note.link)) {
+      // Direct file note
+      const p = toFsPath(note.link)
+      if (!seen.has(p)) { seen.add(p); filePaths.push(p) }
+    } else if (note.container.enabled && note.container.childIds.length > 0) {
+      // Non-file container — check first-level children for file notes
+      for (const childId of note.container.childIds) {
+        const child = appStore.notes.get(childId)
+        if (child?.link && isLocalPath(child.link)) {
+          const p = toFsPath(child.link)
+          if (!seen.has(p)) { seen.add(p); filePaths.push(p) }
+        }
+      }
+    }
+  }
 
-  const rows = fileNotes.map(note => {
-    const fullPath = note.link || ''
-    const parts = fullPath.replace(/\\/g, '/').split('/')
-    const filename = parts[parts.length - 1] || fullPath
-    const dir = parts.slice(0, -1).join('/')
-    return `${filename}\t${dir}`
-  })
-
-  const tsv = rows.join('\n')
-
-  // Build HTML table for rich-text paste targets (email, docs)
-  const htmlRows = rows.map(row => {
-    const [name, dir] = row.split('\t')
-    return `<tr><td style="border:1px solid #ddd;padding:4px 10px">${esc(name)}</td><td style="border:1px solid #ddd;padding:4px 10px">${esc(dir)}</td></tr>`
-  })
-  const htmlTable = `<table style="border-collapse:collapse">
-${htmlRows.join('\n')}
-</table>`
+  if (filePaths.length === 0) {
+    showToast('No file notes in selection')
+    return
+  }
 
   try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        'text/html': new Blob([htmlTable], { type: 'text/html' }),
-        'text/plain': new Blob([tsv], { type: 'text/plain' }),
-      })
-    ])
-    console.log(`[export] Copied ${fileNotes.length} file entries to clipboard`)
-    showToast("Copied file table to clipboard")
+    await navigator.clipboard.writeText(filePaths.join('\n'))
+    showToast(`Copied ${filePaths.length} path${filePaths.length !== 1 ? 's' : ''} to clipboard`)
   } catch (e) {
     console.error('Clipboard write failed:', e)
   }
