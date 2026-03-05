@@ -110,7 +110,7 @@
     <!-- Transformed world -->
     <div
       class="canvas-world"
-      :style="{ transform: canvas.transformCSS.value }"
+      :style="{ transform: canvas.transformCSS.value, '--canvas-scale': canvas.transform.scale }"
     >
       <NoteComponent
         v-for="note in rootNotes"

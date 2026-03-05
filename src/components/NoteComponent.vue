@@ -1169,7 +1169,7 @@ function extractPlainText(content: any): string {
 }
 
 .note-outer.drop-target > .note-frame {
-  box-shadow: 0 0 0 2px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 calc(2px / var(--canvas-scale, 1)) var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* File reference note — type bar now handles visual distinction */
@@ -1199,19 +1199,19 @@ function extractPlainText(content: any): string {
 }
 
 .note-outer:hover:not(.is-selected) > .note-frame {
-  box-shadow: 0 0 0 1px var(--note-color), 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 calc(1px / var(--canvas-scale, 1)) var(--note-color), 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Selected state: blue highlight */
 .note-outer.is-selected > .note-frame {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 calc(1.5px / var(--canvas-scale, 1)) var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Editing state: stronger blue */
 .note-outer.is-editing > .note-frame {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 calc(2px / var(--canvas-scale, 1)) var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Node type header bar — Blender-style title strip */
