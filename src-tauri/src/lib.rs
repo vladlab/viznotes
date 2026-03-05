@@ -215,6 +215,41 @@ fn generate_waveform(
     }
 }
 
+/// Run loudnorm analysis on an audio stream with an optional pan filter for channel remapping.
+/// The filter_chain should be the complete -af value, e.g. "pan=5.1|FL=c0|FR=c1|...,loudnorm=print_format=json"
+/// or just "loudnorm=print_format=json" for a stream that already has the right layout.
+/// Returns the JSON output from loudnorm (extracted from ffmpeg's stderr).
+#[tauri::command]
+fn run_loudnorm(file_path: String, stream_index: usize, filter_chain: String) -> Result<String, String> {
+    let map_arg = format!("0:a:{}", stream_index);
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-i", &file_path,
+            "-map", &map_arg,
+            "-af", &filter_chain,
+            "-f", "null",
+            "-",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // loudnorm prints JSON to stderr. Find the last { ... } block.
+    if let Some(json_start) = stderr.rfind('{') {
+        if let Some(json_end) = stderr[json_start..].rfind('}') {
+            let json_str = &stderr[json_start..json_start + json_end + 1];
+            // Validate it parses as JSON
+            if json_str.contains("input_i") {
+                return Ok(json_str.to_string());
+            }
+        }
+    }
+
+    // If we can't find JSON, return stderr for debugging
+    Err(format!("Could not parse loudnorm output: {}", stderr))
+}
+
 #[tauri::command]
 fn show_in_folder(path: String) -> Result<(), String> {
     let p = Path::new(&path);
@@ -389,6 +424,7 @@ pub fn run() {
             list_system_fonts,
             run_ffprobe,
             generate_waveform,
+            run_loudnorm,
             show_in_folder,
             save_asset,
             read_asset,

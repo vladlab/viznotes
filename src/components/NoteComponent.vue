@@ -228,6 +228,9 @@
           <button @click="analyzeFile('full')" :disabled="analyzing">
             {{ analyzing ? 'Analyzing…' : '🔬 Full analyze' }}
           </button>
+          <button @click="openLoudnessDialog" :disabled="analyzing">
+            📊 Loudness analysis…
+          </button>
         </template>
         <div class="context-separator" />
         <button @click="togglePin">{{ isPinned ? 'Unpin note' : 'Pin note' }}</button>
@@ -237,12 +240,20 @@
         <button class="danger" @click="onDelete">Delete note</button>
       </div>
     </Teleport>
+
+    <!-- Loudness analysis dialog -->
+    <LoudnessDialog
+      v-if="loudnessDialogVisible"
+      :note="note"
+      :audioStreams="loudnessStreams"
+      @close="loudnessDialogVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, inject, onBeforeUnmount, nextTick } from 'vue'
-import { showInFolder, isLocalPath, toFsPath, openExternal } from '../utils/platform'
+import { showInFolder, isLocalPath, toFsPath, openExternal, extractText } from '../utils/platform'
 import { NOTE_COLOR_NAMES, getNoteColor, NODE_TYPES, NODE_TYPE_KEYS } from '../types/note'
 import type { Note } from '../types/note'
 import { replaceAutoSection, appendAutoSection, getSectionBlocks, setSectionBlocks, noteHasAutoBody } from '../utils/autoSections'
@@ -256,6 +267,7 @@ import { nanoid } from 'nanoid'
 import NoteTextSection from './NoteTextSection.vue'
 import NoteContainer from './NoteContainer.vue'
 import NoteLinks from './NoteLinks.vue'
+import LoudnessDialog from './LoudnessDialog.vue'
 import type { ResizeHandle } from '../composables/useResize'
 
 const props = withDefaults(defineProps<{
@@ -705,15 +717,6 @@ function removeLink() {
   closeContextMenu()
 }
 
-function extractText(content: any): string {
-  if (!content) return ''
-  if (content.text) return content.text
-  if (Array.isArray(content.content)) {
-    return content.content.map(extractText).join(' ')
-  }
-  return ''
-}
-
 async function convertToPage() {
   closeContextMenu()
 
@@ -809,6 +812,33 @@ function onDelete() {
 }
 
 const analyzing = ref(false)
+const loudnessDialogVisible = ref(false)
+const loudnessStreams = ref<any[]>([])
+
+async function openLoudnessDialog() {
+  closeContextMenu()
+  if (!isFileLink.value) return
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const fsPath = toFsPath(props.note.link!)
+    const result = await invoke<string>('run_ffprobe', {
+      path: fsPath,
+      args: ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format'],
+    })
+    const data = JSON.parse(result)
+    const audioStreams = (data.streams || []).filter((s: any) => s.codec_type === 'audio')
+    if (audioStreams.length === 0) {
+      showToast('No audio streams found')
+      return
+    }
+    loudnessStreams.value = audioStreams
+    loudnessDialogVisible.value = true
+  } catch (e) {
+    console.error('Failed to probe for loudness:', e)
+    showToast('Failed to read audio streams')
+  }
+}
 
 async function analyzeFile(mode: 'quick' | 'full' = 'quick') {
   if (!isFileLink.value || analyzing.value) return

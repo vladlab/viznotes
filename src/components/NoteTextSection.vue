@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, onBeforeUnmount } from 'vue'
+import { computed, watch, onBeforeUnmount, toRaw } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -123,8 +123,9 @@ watch(
   () => section.value.content,
   (newContent) => {
     if (!editor.value) return
-    // Skip if this is the same reference the editor just wrote (prevents round-trip)
-    if (newContent === lastEditorContent) return
+    // toRaw() strips Vue's reactive Proxy so we can compare against the
+    // plain object reference that onUpdate stored in lastEditorContent.
+    if (toRaw(newContent) === lastEditorContent) return
     // External change (undo, analysis, file replace, etc.)
     editor.value.commands.setContent(newContent, false)
   },

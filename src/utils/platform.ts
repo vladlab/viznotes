@@ -25,3 +25,18 @@ export function isLocalPath(link: string): boolean {
 export function toFsPath(link: string): string {
   return link.startsWith('file:///') ? link.slice(7) : link
 }
+
+/** Recursively extract plain text from a ProseMirror/TipTap JSON node. */
+export function extractText(content: any): string {
+  if (!content) return ''
+  if (content.text) return content.text
+  if (Array.isArray(content.content)) {
+    return content.content.map(extractText).join(' ')
+  }
+  return ''
+}
+
+/** Get display title from a note's head content. */
+export function getNoteTitleText(headContent: any): string {
+  return extractText(headContent).trim() || 'Untitled'
+}

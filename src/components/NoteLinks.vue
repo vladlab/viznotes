@@ -48,6 +48,7 @@ import type { Note } from '../types/note'
 import { NODE_TYPES, getNoteColor } from '../types/note'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
+import { getNoteTitleText } from '../utils/platform'
 
 const props = defineProps<{
   note: Note
@@ -55,19 +56,6 @@ const props = defineProps<{
 
 const dragIdx = ref<number | null>(null)
 const dropIdx = ref<number | null>(null)
-
-function getPlainText(content: any): string {
-  if (!content?.content) return 'Untitled'
-  const texts: string[] = []
-  for (const node of content.content) {
-    if (node.content) {
-      for (const child of node.content) {
-        if (child.text) texts.push(child.text)
-      }
-    }
-  }
-  return texts.join(' ').trim() || 'Untitled'
-}
 
 const linkedNotes = computed(() => {
   const noteLinks = appStore.getLinksForNote(props.note.id)
@@ -90,7 +78,7 @@ const linkedNotes = computed(() => {
   return ordered.map(link => {
     const otherId = appStore.linkedNoteId(link, props.note.id)
     const otherNote = appStore.notes.get(otherId)
-    const title = otherNote ? getPlainText(otherNote.head.content) : 'Deleted'
+    const title = otherNote ? getNoteTitleText(otherNote.head.content) : 'Deleted'
     const color = otherNote ? getNoteColor(otherNote.color.value) : '#888'
     const nodeType = otherNote?.nodeType || 'default'
     const typeLabel = NODE_TYPES[nodeType]?.label || ''

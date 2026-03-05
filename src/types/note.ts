@@ -59,6 +59,27 @@ export interface NoteFoldState {
   links: boolean
 }
 
+export type LoudnessLayout = 'mono' | 'stereo' | '5.1' | '7.1'
+
+export interface LoudnessGroup {
+  name: string
+  layout: LoudnessLayout
+  /** Maps speaker position (e.g. 'L', 'R', 'C', 'LFE', 'Ls', 'Rs') to 0-based source channel index */
+  channels: Record<string, number>
+}
+
+export interface LoudnessConfig {
+  streamIndex: number
+  groups: LoudnessGroup[]
+}
+
+export const LOUDNESS_LAYOUTS: Record<LoudnessLayout, string[]> = {
+  'mono':   ['C'],
+  'stereo': ['L', 'R'],
+  '5.1':    ['L', 'R', 'C', 'LFE', 'Ls', 'Rs'],
+  '7.1':    ['L', 'R', 'C', 'LFE', 'Ls', 'Rs', 'Lrs', 'Rrs'],
+}
+
 export interface Note {
   id: string
   pageId: string
@@ -77,6 +98,7 @@ export interface Note {
   nodeType: string  // key from NODE_TYPES
   link: string   // page ID, URL, or empty
   fileSize?: number  // file size in bytes (for file-linked notes)
+  loudnessConfig?: LoudnessConfig[]  // channel groupings for BS.1770 loudness analysis
 
   collapsed: boolean
   foldState: NoteFoldState

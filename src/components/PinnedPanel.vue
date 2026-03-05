@@ -67,6 +67,7 @@ import type { Note } from '../types/note'
 import { appStore } from '../stores/app'
 import { pinnedNoteIds, unpinNote } from '../stores/pinned'
 import { noteHasAutoBody } from '../utils/autoSections'
+import { getNoteTitleText } from '../utils/platform'
 import NoteTextSection from './NoteTextSection.vue'
 import NoteLinks from './NoteLinks.vue'
 
@@ -79,21 +80,13 @@ const pinnedNotes = computed(() => {
 })
 
 function getNoteTitle(note: Note): string {
-  const content = note.head?.content?.content
-  if (!content) return 'Untitled'
-  for (const node of content) {
-    if (node.content) {
-      const text = node.content.map((c: any) => c.text || '').join('')
-      if (text) return text
-    }
-  }
-  return 'Untitled'
+  return getNoteTitleText(note.head.content)
 }
 
 function getChildTitle(childId: string): string {
   const note = appStore.notes.get(childId)
   if (!note) return 'Deleted'
-  return getNoteTitle(note)
+  return getNoteTitleText(note.head.content)
 }
 
 function hasAutoBody(note: Note): boolean {
