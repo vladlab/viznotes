@@ -29,6 +29,7 @@ import Underline from '@tiptap/extension-underline'
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
 import { Markdown } from 'tiptap-markdown'
 import { TiptapImage } from '../extensions/TiptapImage'
+import { TrailingParagraph } from '../extensions/TrailingParagraph'
 import { saveImageAsset } from '../utils/assets'
 import { getStorage } from '../stores/state'
 import type { Note, NoteTextSection } from '../types/note'
@@ -72,6 +73,7 @@ const editor = useEditor({
       transformCopiedText: false,
     }),
     TiptapImage,
+    TrailingParagraph,
   ],
   editorProps: {
     attributes: {
@@ -119,10 +121,10 @@ watch(
   () => section.value.content,
   (newContent) => {
     if (suppressContentWatch || !editor.value) return
-    // Reference changed → content was replaced externally (undo, analysis, etc.)
-    // Let ProseMirror handle its own diffing via setContent
+    // Reference changed externally (undo, analysis, file replace, etc.)
     editor.value.commands.setContent(newContent, false)
   },
+  { flush: 'sync' },
 )
 
 const sectionStyle = computed(() => {
