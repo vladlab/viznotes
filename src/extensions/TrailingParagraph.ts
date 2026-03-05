@@ -1,10 +1,10 @@
 /**
- * TrailingParagraph — handles the "stuck empty paragraph after heading" issue.
+ * TrailingParagraph — handles "stuck empty paragraph" after block-level nodes.
  *
- * In ProseMirror, pressing Enter at the end of a heading creates a new paragraph.
- * Pressing Backspace at the start of that empty paragraph sometimes doesn't join it
- * back into the heading. This extension adds a Backspace handler that deletes the
- * empty paragraph outright, placing the cursor at the end of the preceding heading.
+ * When you convert a line to a heading or toggle a list, ProseMirror may leave
+ * an empty paragraph that Backspace can't remove because it won't join
+ * different node types. This extension intercepts Backspace at position 0
+ * of an empty paragraph and deletes it outright.
  */
 
 import { Extension } from '@tiptap/core'
@@ -26,14 +26,20 @@ export const TrailingParagraph = Extension.create({
         if ($from.parent.type.name !== 'paragraph') return false
         if ($from.parent.content.size !== 0) return false
 
-        // Must have a heading immediately before this paragraph
+        // Must have a preceding sibling that is NOT a paragraph
+        // (headings, lists, blockquotes, code blocks, etc.)
         const posBefore = $from.before()
         if (posBefore <= 0) return false
         const resolved = state.doc.resolve(posBefore)
         const nodeBefore = resolved.nodeBefore
-        if (!nodeBefore || nodeBefore.type.name !== 'heading') return false
+        if (!nodeBefore) return false
+        // If the previous node is also a paragraph, let default Backspace handle it
+        if (nodeBefore.type.name === 'paragraph') return false
 
-        // Delete the empty paragraph, cursor lands at end of heading
+        // Don't delete if this is the only block in the doc
+        if (state.doc.childCount <= 1) return false
+
+        // Delete the empty paragraph, cursor lands at end of previous node
         const from = $from.before()
         const to = $from.after()
         editor.chain()

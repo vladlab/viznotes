@@ -295,12 +295,13 @@ function getNoteRect(noteId: string): NoteRect | null {
   if (appStore.dragSessionNoteIds.size > 0) {
     if (appStore.dragSessionNoteIds.has(noteId)) {
       // Dragged note — compute from pos + cached size (no DOM read)
+      // offsetWidth/Height are CSS layout sizes, unaffected by ancestor transforms,
+      // so they're already in world-space units — no scale division needed.
       const note = appStore.notes.get(noteId)
       const size = appStore.dragNoteSizeCache.get(noteId)
       if (note && size) {
-        const t = props.transform
-        const w = size.w / t.scale
-        const h = size.h / t.scale
+        const w = size.w
+        const h = size.h
         const x = note.pos.x
         const y = note.pos.y
         return { id: noteId, x, y, w, h, cx: x + w / 2, cy: y + h / 2 }

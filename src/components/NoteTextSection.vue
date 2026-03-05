@@ -45,7 +45,9 @@ const section = computed(() => props.note[props.sectionName])
 const isEditing = computed(() => appStore.editingNoteId.value === props.note.id)
 const isReadOnly = computed(() => props.sectionName === 'autoBody')
 
-let suppressContentWatch = false
+// Track the last content written BY the editor, so the watcher can skip round-trips.
+// Reference equality check — no timing dependency.
+let lastEditorContent: any = null
 
 const editor = useEditor({
   content: section.value.content,
@@ -82,10 +84,10 @@ const editor = useEditor({
   },
   onUpdate: ({ editor }) => {
     if (isReadOnly.value) return
-    suppressContentWatch = true
-    props.note[props.sectionName].content = editor.getJSON()
+    const json = editor.getJSON()
+    lastEditorContent = json
+    props.note[props.sectionName].content = json
     appStore.markNoteDirty(props.note, 500)
-    suppressContentWatch = false
 
     // Check for blob:/data: images that need saving to assets
     fixUnsavedImages()
@@ -120,11 +122,12 @@ watch(isEditing, (editing) => {
 watch(
   () => section.value.content,
   (newContent) => {
-    if (suppressContentWatch || !editor.value) return
-    // Reference changed externally (undo, analysis, file replace, etc.)
+    if (!editor.value) return
+    // Skip if this is the same reference the editor just wrote (prevents round-trip)
+    if (newContent === lastEditorContent) return
+    // External change (undo, analysis, file replace, etc.)
     editor.value.commands.setContent(newContent, false)
   },
-  { flush: 'sync' },
 )
 
 const sectionStyle = computed(() => {
@@ -218,10 +221,10 @@ function fixUnsavedImages() {
       }
 
       if (changed) {
-        suppressContentWatch = true
-        props.note[props.sectionName].content = editor.value!.getJSON()
+        const json = editor.value!.getJSON()
+        lastEditorContent = json
+        props.note[props.sectionName].content = json
         appStore.markNoteDirty(props.note, 500)
-        suppressContentWatch = false
       }
     } finally {
       imageFixPending = false
@@ -293,6 +296,15 @@ onBeforeUnmount(() => {
 
 .note-text-section:not(.is-editing) .tiptap *::selection {
   background: transparent;
+}
+
+/* Hide trailing empty paragraphs when not editing.
+   ProseMirror appends these after headings/lists/blockquotes for cursor positioning.
+   Useful during editing, but should not render as visible blank space otherwise.
+   Covers both <p></p> (:empty) and <p><br></p> (:has(> br:only-child)). */
+.note-text-section:not(.is-editing) .tiptap > p:last-child:not(:only-child):empty,
+.note-text-section:not(.is-editing) .tiptap > p:last-child:not(:only-child):has(> br:only-child) {
+  display: none;
 }
 
 /* Headings */
