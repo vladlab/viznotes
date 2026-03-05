@@ -215,18 +215,15 @@ fn generate_waveform(
     }
 }
 
-/// Run loudnorm analysis on an audio stream with an optional pan filter for channel remapping.
-/// The filter_chain should be the complete -af value, e.g. "pan=5.1|FL=c0|FR=c1|...,loudnorm=print_format=json"
-/// or just "loudnorm=print_format=json" for a stream that already has the right layout.
+/// Run loudnorm analysis using a filter_complex graph.
+/// The filter_complex string handles stream selection, amerge, pan, and loudnorm.
 /// Returns the JSON output from loudnorm (extracted from ffmpeg's stderr).
 #[tauri::command]
-fn run_loudnorm(file_path: String, stream_index: usize, filter_chain: String) -> Result<String, String> {
-    let map_arg = format!("0:a:{}", stream_index);
+fn run_loudnorm(file_path: String, filter_complex: String) -> Result<String, String> {
     let output = std::process::Command::new("ffmpeg")
         .args([
             "-i", &file_path,
-            "-map", &map_arg,
-            "-af", &filter_chain,
+            "-filter_complex", &filter_complex,
             "-f", "null",
             "-",
         ])

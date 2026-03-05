@@ -13,7 +13,7 @@
             <label>Available channels</label>
             <div class="channel-summary">
               <span v-for="ch in allChannels" :key="ch.id" class="channel-tag">
-                {{ ch.label }}
+                {{ ch.shortLabel }}
               </span>
             </div>
           </div>
@@ -25,7 +25,7 @@
             </div>
 
             <div v-if="groups.length === 0" class="loudness-empty">
-              No groups defined. Add a group to map channels to a speaker layout.
+              Add a group to define how channels map to speaker positions.
             </div>
 
             <div v-for="(group, gIdx) in groups" :key="gIdx" class="loudness-group">
@@ -41,11 +41,11 @@
               </div>
               <div class="channel-map">
                 <div v-for="pos in layoutPositions(group.layout)" :key="pos" class="channel-assign">
-                  <label>{{ pos }}</label>
+                  <span class="channel-pos">{{ pos }}</span>
                   <select v-model="group.channels[pos]">
                     <option value="">—</option>
                     <option v-for="ch in allChannels" :key="ch.id" :value="ch.id">
-                      {{ ch.label }}
+                      {{ ch.shortLabel }}
                     </option>
                   </select>
                 </div>
@@ -115,7 +115,7 @@ interface ChannelRef {
   id: string          // "0:0", "0:1", "1:0", etc.
   streamIdx: number
   channelIdx: number
-  label: string       // "S0 Ch1 (aac stereo)" etc.
+  shortLabel: string  // "S0 Ch1" for multi-ch streams, "S0" for mono
 }
 
 const allChannels = computed<ChannelRef[]>(() => {
@@ -123,14 +123,12 @@ const allChannels = computed<ChannelRef[]>(() => {
   for (let si = 0; si < props.audioStreams.length; si++) {
     const s = props.audioStreams[si]
     const chCount = parseInt(s.channels || '0', 10)
-    const codec = s.codec_name || '?'
-    const layout = s.channel_layout && s.channel_layout !== 'unknown' ? s.channel_layout : `${chCount}ch`
     for (let ci = 0; ci < chCount; ci++) {
       list.push({
         id: `${si}:${ci}`,
         streamIdx: si,
         channelIdx: ci,
-        label: `S${si} Ch${ci + 1} (${codec} ${layout})`,
+        shortLabel: chCount === 1 ? `S${si}` : `S${si} Ch${ci + 1}`,
       })
     }
   }
@@ -144,7 +142,6 @@ function layoutPositions(layout: LoudnessLayout): string[] {
 // ── Group management ──
 
 function addGroup() {
-  // Collect all channel IDs already assigned in existing groups
   const used = new Set<string>()
   for (const g of groups) {
     for (const v of Object.values(g.channels)) {
@@ -152,11 +149,9 @@ function addGroup() {
     }
   }
 
-  // Find next unassigned channels
   const available = allChannels.value.filter(ch => !used.has(ch.id))
   const remaining = available.length
 
-  // Pick layout based on remaining channels
   let layout: LoudnessLayout
   if (remaining >= 8) layout = '7.1'
   else if (remaining >= 6) layout = '5.1'
@@ -182,15 +177,14 @@ function onLayoutChange(group: LoudnessGroup) {
   const oldValues = Object.values(oldChannels).filter(v => v)
   const newChannels: Record<string, string> = {}
   positions.forEach((pos, i) => {
-    // Keep existing assignment if position name matches, otherwise reuse by index
     newChannels[pos] = oldChannels[pos] ?? (i < oldValues.length ? oldValues[i] : '')
   })
   group.channels = newChannels
 }
 
-// ── Build FFmpeg filter chain ──
+// ── Build FFmpeg filter_complex ──
 
-function buildFilterChain(group: LoudnessGroup): { streamIdx: number; filter: string } | null {
+function buildFilterComplex(group: LoudnessGroup): string | null {
   const positions = LOUDNESS_LAYOUTS[group.layout]
   const assignments = positions
     .map(pos => ({ pos, ref: group.channels[pos] }))
@@ -198,26 +192,48 @@ function buildFilterChain(group: LoudnessGroup): { streamIdx: number; filter: st
 
   if (assignments.length === 0) return null
 
-  // Parse channel refs — all must be from the same stream for now
   const parsed = assignments.map(a => {
     const [si, ci] = a.ref.split(':').map(Number)
     return { pos: a.pos, streamIdx: si, channelIdx: ci }
   })
 
-  const streams = new Set(parsed.map(p => p.streamIdx))
-  if (streams.size > 1) {
-    // Multi-stream groups need filter_complex with amerge — not supported yet
-    return null
+  // Collect unique streams in order
+  const streamSet = new Map<number, number>() // streamIdx → index in amerge output
+  const streamOrder: number[] = []
+  for (const p of parsed) {
+    if (!streamSet.has(p.streamIdx)) {
+      streamSet.set(p.streamIdx, streamOrder.length)
+      streamOrder.push(p.streamIdx)
+    }
   }
 
-  const streamIdx = parsed[0].streamIdx
-  const panParts = parsed.map(p =>
-    `${POS_TO_FFMPEG[p.pos] || p.pos}=c${p.channelIdx}`
+  // For each stream, figure out its channel count for offset calculation
+  const streamChannelCounts: number[] = streamOrder.map(si =>
+    parseInt(props.audioStreams[si]?.channels || '1', 10)
   )
 
+  // Compute each channel's index in the amerge output
+  // amerge concatenates channels: stream0_ch0, stream0_ch1, ..., stream1_ch0, ...
+  const streamOffsets = new Map<number, number>()
+  let offset = 0
+  for (let i = 0; i < streamOrder.length; i++) {
+    streamOffsets.set(streamOrder[i], offset)
+    offset += streamChannelCounts[i]
+  }
+
+  // Build input labels and amerge
+  const inputs = streamOrder.map(si => `[0:a:${si}]`).join('')
+  const needsMerge = streamOrder.length > 1
+  const mergeFilter = needsMerge ? `amerge=inputs=${streamOrder.length},` : ''
+
+  // Build pan assignments using amerge output channel indices
+  const panParts = parsed.map(p => {
+    const mergedIdx = streamOffsets.get(p.streamIdx)! + p.channelIdx
+    return `${POS_TO_FFMPEG[p.pos] || p.pos}=c${mergedIdx}`
+  })
+
   const layoutStr = group.layout
-  const filter = `pan=${layoutStr}|${panParts.join('|')},loudnorm=print_format=json`
-  return { streamIdx, filter }
+  return `${inputs}${mergeFilter}pan=${layoutStr}|${panParts.join('|')},loudnorm=print_format=json`
 }
 
 // ── Run analysis ──
@@ -234,17 +250,16 @@ async function runAnalysis() {
       const group = groups[i]
       status.value = `Analyzing ${group.name}…`
 
-      const chain = buildFilterChain(group)
-      if (!chain) {
-        results[i] = { error: 'No channels assigned or mixed streams (not yet supported)' }
+      const filterComplex = buildFilterComplex(group)
+      if (!filterComplex) {
+        results[i] = { error: 'No channels assigned' }
         continue
       }
 
       try {
         const jsonStr = await invoke<string>('run_loudnorm', {
           filePath,
-          streamIndex: chain.streamIdx,
-          filterChain: chain.filter,
+          filterComplex,
         })
         results[i] = JSON.parse(jsonStr)
       } catch (e) {
@@ -256,7 +271,7 @@ async function runAnalysis() {
     // Save config to note
     const before = history.snapshotNote(appStore.notes, props.note.id)!
     const config: LoudnessConfig = {
-      streamIndex: 0, // legacy field, ignored in new model
+      streamIndex: 0,
       groups: groups.map(g => ({ ...g, channels: { ...g.channels } })),
     }
     props.note.loudnessConfig = [config]
@@ -322,7 +337,7 @@ onMounted(() => {
   background: var(--bg-surface);
   border: 1px solid var(--border-main);
   border-radius: 8px;
-  width: 560px;
+  width: 480px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -353,9 +368,7 @@ onMounted(() => {
   line-height: 1;
 }
 
-.loudness-close:hover {
-  color: var(--text-primary);
-}
+.loudness-close:hover { color: var(--text-primary); }
 
 .loudness-body {
   flex: 1;
@@ -366,29 +379,25 @@ onMounted(() => {
   gap: 12px;
 }
 
-.loudness-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .loudness-field label {
-  font-size: 0.78em;
+  font-size: 0.72em;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   color: var(--text-faint);
+  display: block;
+  margin-bottom: 4px;
 }
 
 .channel-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
 }
 
 .channel-tag {
-  font-size: 0.75em;
-  padding: 2px 6px;
+  font-size: 0.72em;
+  padding: 1px 5px;
   border-radius: 3px;
   background: var(--bg-surface-hover);
   color: var(--text-secondary);
@@ -401,10 +410,10 @@ onMounted(() => {
 }
 
 .loudness-groups-header span {
-  font-size: 0.78em;
+  font-size: 0.72em;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   color: var(--text-faint);
 }
 
@@ -412,20 +421,18 @@ onMounted(() => {
   background: none;
   border: 1px solid var(--border-input);
   border-radius: 4px;
-  padding: 3px 10px;
-  font-size: 0.8em;
+  padding: 2px 8px;
+  font-size: 0.78em;
   color: var(--text-secondary);
   cursor: pointer;
 }
 
-.loudness-add-group:hover {
-  background: var(--bg-surface-hover);
-}
+.loudness-add-group:hover { background: var(--bg-surface-hover); }
 
 .loudness-empty {
-  font-size: 0.82em;
+  font-size: 0.8em;
   color: var(--text-faint);
-  padding: 8px 0;
+  padding: 6px 0;
 }
 
 .loudness-group {
@@ -440,7 +447,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .group-name-input {
@@ -448,80 +455,80 @@ onMounted(() => {
   background: var(--bg-input);
   border: 1px solid var(--border-input);
   border-radius: 3px;
-  padding: 4px 6px;
+  padding: 3px 6px;
   color: var(--text-primary);
-  font-size: 0.85em;
+  font-size: 0.82em;
 }
 
 .group-header select {
   background: var(--bg-input);
   border: 1px solid var(--border-input);
   border-radius: 3px;
-  padding: 4px 6px;
+  padding: 3px 6px;
   color: var(--text-primary);
-  font-size: 0.85em;
+  font-size: 0.82em;
+  width: 70px;
 }
 
 .group-remove {
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 1.2em;
+  font-size: 1.1em;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 2px;
   line-height: 1;
 }
 
-.group-remove:hover {
-  color: var(--danger-text);
-}
+.group-remove:hover { color: var(--danger-text); }
 
 .channel-map {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 4px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .channel-assign {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
-.channel-assign label {
-  font-size: 0.78em;
-  font-weight: 600;
+.channel-pos {
+  font-size: 0.72em;
+  font-weight: 700;
   color: var(--text-secondary);
-  width: 28px;
+  width: 22px;
+  text-align: right;
   flex-shrink: 0;
 }
 
 .channel-assign select {
-  flex: 1;
   background: var(--bg-input);
   border: 1px solid var(--border-input);
   border-radius: 3px;
-  padding: 2px 4px;
+  padding: 2px 3px;
   color: var(--text-primary);
-  font-size: 0.78em;
+  font-size: 0.75em;
+  width: 58px;
 }
 
 .group-result {
   display: flex;
-  gap: 12px;
-  margin-top: 8px;
-  padding-top: 6px;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 5px;
   border-top: 1px solid var(--border-subtle);
 }
 
 .result-value {
-  font-size: 0.82em;
+  font-size: 0.8em;
   font-weight: 600;
   color: var(--accent-text);
 }
 
 .result-error {
-  font-size: 0.82em;
+  font-size: 0.8em;
   color: var(--danger-text);
 }
 
@@ -529,16 +536,15 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 8px 16px;
   border-top: 1px solid var(--border-subtle);
   gap: 8px;
 }
 
 .loudness-status {
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: var(--text-faint);
   flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -551,18 +557,16 @@ onMounted(() => {
 }
 
 .loudness-actions button {
-  padding: 6px 16px;
+  padding: 5px 14px;
   border-radius: 4px;
   border: 1px solid var(--border-input);
   background: var(--bg-input);
   color: var(--text-primary);
-  font-size: 0.85em;
+  font-size: 0.82em;
   cursor: pointer;
 }
 
-.loudness-actions button:hover {
-  background: var(--bg-surface-hover);
-}
+.loudness-actions button:hover { background: var(--bg-surface-hover); }
 
 .loudness-actions button.primary {
   background: var(--accent);
@@ -570,12 +574,6 @@ onMounted(() => {
   color: white;
 }
 
-.loudness-actions button.primary:hover {
-  filter: brightness(1.1);
-}
-
-.loudness-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.loudness-actions button.primary:hover { filter: brightness(1.1); }
+.loudness-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
