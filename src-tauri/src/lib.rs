@@ -307,12 +307,20 @@ fn run_loudnorm(
 
     // Extract all JSON blocks containing "input_i" (one per loudnorm instance)
     let blocks = extract_loudnorm_json(&full_stderr);
-    if blocks.is_empty() {
-        return Err(format!("No loudnorm results found. stderr: {}", 
-            &full_stderr[full_stderr.len().saturating_sub(500)..]));
-    }
 
-    Ok(format!("[{}]", blocks.join(",")))
+    // Return both results and raw stderr for debugging
+    // Escape stderr for JSON embedding
+    let stderr_escaped = full_stderr
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
+
+    if blocks.is_empty() {
+        Ok(format!("{{\"results\":[],\"stderr\":\"{}\"}}", stderr_escaped))
+    } else {
+        Ok(format!("{{\"results\":[{}],\"stderr\":\"{}\"}}", blocks.join(","), stderr_escaped))
+    }
 }
 
 fn parse_ffmpeg_time(s: &str) -> Option<f64> {

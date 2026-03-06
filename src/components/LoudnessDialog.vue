@@ -66,6 +66,12 @@
           </div>
         </div>
 
+        <!-- FFmpeg log -->
+        <details v-if="ffmpegLog" class="loudness-log">
+          <summary>FFmpeg output</summary>
+          <pre class="loudness-log-pre">{{ ffmpegLog }}</pre>
+        </details>
+
         <div class="loudness-footer">
           <template v-if="analyzing">
             <div class="loudness-progress-bar">
@@ -114,6 +120,7 @@ const results = reactive<Record<number, any>>({})
 const analyzing = ref(false)
 const progress = ref(0)
 const status = ref('')
+const ffmpegLog = ref('')
 let unlistenProgress: (() => void) | null = null
 
 // Speaker position → FFmpeg channel name
@@ -305,6 +312,7 @@ async function runAnalysis() {
     const filterComplex = filters.map(f => f.filterStr).join(';')
     const mapArgs = filters.map(f => `[${f.outputLabel}]`)
 
+    ffmpegLog.value = `filter_complex: ${filterComplex}\nmap: ${mapArgs.join(' ')}\n\n`
     status.value = `Analyzing ${filters.length} group${filters.length > 1 ? 's' : ''}…`
 
     try {
@@ -315,16 +323,26 @@ async function runAnalysis() {
         durationSecs: props.duration || 0,
       })
 
-      const resultArray = JSON.parse(jsonStr)
+      const response = JSON.parse(jsonStr)
+      const resultArray = response.results || []
+      ffmpegLog.value += response.stderr || ''
 
-      // Map results back — filters are in order, skipping errored groups
-      let resultIdx = 0
-      for (let i = 0; i < groups.length; i++) {
-        if (groupErrors[i]) {
-          results[i] = { error: groupErrors[i] }
-        } else if (resultIdx < resultArray.length) {
-          results[i] = resultArray[resultIdx]
-          resultIdx++
+      if (resultArray.length === 0) {
+        for (let i = 0; i < groups.length; i++) {
+          if (!groupErrors[i]) {
+            results[i] = { error: 'No loudnorm output — check log for details' }
+          }
+        }
+      } else {
+        // Map results back — filters are in order, skipping errored groups
+        let resultIdx = 0
+        for (let i = 0; i < groups.length; i++) {
+          if (groupErrors[i]) {
+            results[i] = { error: groupErrors[i] }
+          } else if (resultIdx < resultArray.length) {
+            results[i] = resultArray[resultIdx]
+            resultIdx++
+          }
         }
       }
     } catch (e) {
@@ -334,6 +352,7 @@ async function runAnalysis() {
         return  // Don't save partial results
       }
       console.error('Loudness analysis failed:', e)
+      if (!ffmpegLog.value) ffmpegLog.value = msg
       for (let i = 0; i < groups.length; i++) {
         if (!groupErrors[i]) {
           results[i] = { error: msg }
@@ -520,6 +539,34 @@ onMounted(() => {
 }
 .result-value { font-size: 0.8em; font-weight: 600; color: var(--accent-text); }
 .result-error { font-size: 0.8em; color: var(--danger-text); }
+
+.loudness-log {
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.75em;
+}
+
+.loudness-log summary {
+  padding: 4px 16px;
+  color: var(--text-faint);
+  cursor: pointer;
+  user-select: none;
+}
+
+.loudness-log summary:hover {
+  color: var(--text-secondary);
+}
+
+.loudness-log-pre {
+  margin: 0;
+  padding: 4px 16px 8px;
+  overflow: auto;
+  max-height: 200px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.92em;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
 
 .loudness-footer {
   padding: 8px 16px; border-top: 1px solid var(--border-subtle);
