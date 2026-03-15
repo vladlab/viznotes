@@ -153,8 +153,12 @@
         <button @click="toggleSection('container')">
           {{ note.container.enabled ? '✓ ' : '' }}Container
         </button>
+        <template v-if="note.container.enabled">
+          <button @click="toggleContainerLayout">
+            Layout: {{ (note.container.layout || 'list') === 'columns' ? 'Columns' : 'List' }}
+          </button>
+        </template>
         <div class="context-separator" />
-        <div v-if="note.container.enabled" class="context-separator" />
         <div class="context-colors">
           <button
             v-for="name in NOTE_COLOR_NAMES"
@@ -569,6 +573,14 @@ function toggleSection(section: 'body' | 'container') {
   props.note[section].enabled = !props.note[section].enabled
   appStore.updateNote(props.note)
   appStore.pushNotePropertyAction(props.note.id, before, `Toggle ${section}`)
+  closeContextMenu()
+}
+
+function toggleContainerLayout() {
+  const before = history.snapshotNote(appStore.notes, props.note.id)!
+  props.note.container.layout = (props.note.container.layout || 'list') === 'columns' ? 'list' : 'columns'
+  appStore.updateNote(props.note)
+  appStore.pushNotePropertyAction(props.note.id, before, 'Toggle container layout')
   closeContextMenu()
 }
 

@@ -29,6 +29,10 @@ export const NODE_TYPES: Record<string, NodeTypeInfo> = {
     label: 'Status',
     icon: 'M22 12h-4l-3 9L9 3l-3 9H2',
   },
+  search: {
+    label: 'Search',
+    icon: 'M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z',
+  },
 } as const
 
 export const NODE_TYPE_KEYS = Object.keys(NODE_TYPES) as (keyof typeof NODE_TYPES)[]
@@ -99,10 +103,12 @@ export interface Note {
   link: string   // page ID, URL, or empty
   fileSize?: number  // file size in bytes (for file-linked notes)
   loudnessConfig?: LoudnessConfig[]  // channel groupings for BS.1770 loudness analysis
+  searchQuery?: string  // persisted search query for search-type nodes
 
   collapsed: boolean
   foldState: NoteFoldState
   linkOrder: string[]  // ordered link IDs for display in Links section
+  linkViewMode: 'tag' | 'brief' | 'full'
   movable: boolean
   resizable: boolean
 
@@ -158,6 +164,7 @@ export function createDefaultNote(
     collapsed: false,
     foldState: { autoBody: false, body: false, container: false, links: false },
     linkOrder: [],
+    linkViewMode: 'brief',
     movable: true,
     resizable: true,
 

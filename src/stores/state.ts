@@ -8,6 +8,7 @@ import { reactive, ref, computed, toRaw, nextTick, watch } from 'vue'
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
 import type { Link } from '../types/link'
+import type { Area } from '../types/area'
 import type { Page, PageSummary } from '../types/page'
 import type { StorageBackend } from '../storage/interface'
 import { activePane, activePaneId, panes, type PaneContext } from './panes'
@@ -48,6 +49,7 @@ export const currentPage = computed<Page | null>(() => {
 export const notes = reactive<Map<string, Note>>(new Map())
 export const arrows = reactive<Map<string, Arrow>>(new Map())
 export const links = reactive<Map<string, Link>>(new Map())
+export const areas = reactive<Map<string, Area>>(new Map())
 
 export const pageList = ref<PageSummary[]>([])
 export const pageHistory = ref<string[]>([])
@@ -371,6 +373,7 @@ export function loadPageData(
   pageNotes: Note[],
   pageArrows: Arrow[],
   pageLinks: Link[],
+  pageAreas: Area[] = [],
 ) {
   loadedPages.set(page.id, page)
   for (const note of pageNotes) {
@@ -389,17 +392,20 @@ export function loadPageData(
     if (!note.linkOrder) {
       note.linkOrder = []
     }
+    if (!note.linkViewMode) {
+      note.linkViewMode = 'brief'
+    }
     notes.set(note.id, note)
   }
   for (const arrow of pageArrows) arrows.set(arrow.id, arrow)
   for (const link of pageLinks) links.set(link.id, link)
+  for (const area of pageAreas) areas.set(area.id, area)
   rebuildParentMap()
 }
 
 /** Unload a page's data from shared Maps (only if no pane still references it) */
 export function unloadPageData(pageId: string) {
   loadedPages.delete(pageId)
-  // Remove notes, arrows, links belonging to this page
   for (const [id, note] of notes) {
     if (note.pageId === pageId) notes.delete(id)
   }
@@ -408,6 +414,9 @@ export function unloadPageData(pageId: string) {
   }
   for (const [id, link] of links) {
     if (link.pageId === pageId) links.delete(id)
+  }
+  for (const [id, area] of areas) {
+    if (area.pageId === pageId) areas.delete(id)
   }
   rebuildParentMap()
 }

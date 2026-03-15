@@ -1,6 +1,27 @@
 <template>
-  <div v-if="linkedNotes.length > 0" class="note-links-section">
-    <div class="note-links-list">
+  <div v-if="linkedNotes.length > 0" class="note-links-section" :class="`links-${viewMode}`">
+
+    <!-- TAG mode: horizontal pill row -->
+    <div v-if="viewMode === 'tag'" class="note-links-tags">
+      <span
+        v-for="ln in linkedNotes"
+        :key="ln.linkId"
+        class="link-tag"
+        :style="{ '--chip-color': ln.chipColor }"
+        :title="ln.title"
+        @click.stop="selectLinked(ln.noteId)"
+      >
+        {{ ln.title }}
+        <button
+          class="link-tag-remove"
+          @click.stop="removeLink(ln.linkId)"
+          title="Remove link"
+        >&times;</button>
+      </span>
+    </div>
+
+    <!-- BRIEF mode: vertical chevron chips (original) -->
+    <div v-else-if="viewMode === 'brief'" class="note-links-list">
       <div
         v-for="(ln, idx) in linkedNotes"
         :key="ln.linkId"
@@ -39,20 +60,56 @@
         />
       </div>
     </div>
+
+    <!-- FULL mode: render linked notes as full NoteComponents -->
+    <div v-else class="note-links-full">
+      <template v-for="ln in linkedNotes" :key="ln.linkId">
+        <div v-if="ancestorIds.has(ln.noteId)" class="linked-note-cycle">
+          ↻ {{ ln.title }} (circular)
+        </div>
+        <div v-else-if="getLinkedNote(ln.noteId)" class="linked-note-wrapper">
+          <NoteComponent
+            :note="getLinkedNote(ln.noteId)!"
+            :spatial="false"
+            :linkedView="true"
+            :depth="depth + 1"
+          />
+          <button
+            class="linked-note-remove"
+            @click.stop="removeLink(ln.linkId)"
+            title="Remove link"
+          >&times;</button>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, inject } from 'vue'
 import type { Note } from '../types/note'
 import { NODE_TYPES, getNoteColor } from '../types/note'
 import { appStore } from '../stores/app'
 import { history } from '../stores/history'
 import { getNoteTitleText } from '../utils/platform'
+import NoteComponent from './NoteComponent.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   note: Note
-}>()
+  depth?: number
+}>(), {
+  depth: 0,
+})
+
+const MAX_FULL_DEPTH = 3
+
+// Recursion guard — injected from NoteComponent
+const ancestorIds = inject<Set<string>>('linkAncestorIds', new Set())
+
+const viewMode = computed(() => {
+  if (props.depth >= MAX_FULL_DEPTH && props.note.linkViewMode === 'full') return 'brief'
+  return props.note.linkViewMode || 'brief'
+})
 
 const dragIdx = ref<number | null>(null)
 const dropIdx = ref<number | null>(null)
@@ -61,10 +118,7 @@ const linkedNotes = computed(() => {
   const noteLinks = appStore.getLinksForNote(props.note.id)
   const order = props.note.linkOrder || []
 
-  // Build lookup: linkId → Link
   const linkMap = new Map(noteLinks.map(l => [l.id, l]))
-
-  // Ordered links: linkOrder first, then any remaining by creation time
   const ordered: typeof noteLinks = []
   const seen = new Set<string>()
   for (const id of order) {
@@ -87,12 +141,15 @@ const linkedNotes = computed(() => {
       noteId: otherId,
       title,
       typeLabel,
-      chipStyle: {
-        '--chip-color': color,
-      },
+      chipColor: color,
+      chipStyle: { '--chip-color': color },
     }
   })
 })
+
+function getLinkedNote(noteId: string): Note | undefined {
+  return appStore.notes.get(noteId)
+}
 
 function selectLinked(noteId: string) {
   if (appStore.notes.has(noteId)) {
@@ -105,7 +162,7 @@ function removeLink(linkId: string) {
   appStore.deleteLink(linkId)
 }
 
-// ── Drag-to-reorder ──
+// ── Drag-to-reorder (brief mode) ──
 
 function onDragStart(idx: number, e: DragEvent) {
   dragIdx.value = idx
@@ -123,18 +180,13 @@ function onDragEnd() {
 function onDragOver(idx: number, e: DragEvent) {
   if (dragIdx.value === null) return
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-
-  // Determine if cursor is in top or bottom half of the chip
   const target = (e.currentTarget as HTMLElement)
   const rect = target.getBoundingClientRect()
   const midY = rect.top + rect.height / 2
-  const insertIdx = e.clientY < midY ? idx : idx + 1
-  dropIdx.value = insertIdx
+  dropIdx.value = e.clientY < midY ? idx : idx + 1
 }
 
-function onDragLeave(_idx: number) {
-  // Only clear if leaving the list entirely (dragover on next chip will re-set)
-}
+function onDragLeave(_idx: number) {}
 
 function onDrop(idx: number) {
   if (dragIdx.value === null || dropIdx.value === null) return
@@ -146,14 +198,11 @@ function onDrop(idx: number) {
 
   if (fromIdx === toIdx || fromIdx + 1 === toIdx) return
 
-  // Build new order from current linkedNotes
   const ids = linkedNotes.value.map(ln => ln.linkId)
   const [moved] = ids.splice(fromIdx, 1)
-  // Adjust target index after removal
   if (toIdx > fromIdx) toIdx--
   ids.splice(toIdx, 0, moved)
 
-  // Persist with undo
   const before = history.snapshotNote(appStore.notes, props.note.id)!
   props.note.linkOrder = ids
   appStore.updateNote(props.note)
@@ -164,14 +213,64 @@ function onDrop(idx: number) {
 <style>
 .note-links-section {
   border-top: 1px solid var(--divider);
-  padding: 4px 6px;
   flex-shrink: 0;
 }
+
+/* ── Tag mode ── */
+
+.note-links-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 4px 6px;
+}
+
+.link-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.75em;
+  background: color-mix(in srgb, var(--chip-color) 20%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.link-tag:hover {
+  background: color-mix(in srgb, var(--chip-color) 35%, transparent);
+}
+
+.link-tag-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.link-tag:hover .link-tag-remove {
+  opacity: 0.6;
+}
+
+.link-tag-remove:hover {
+  opacity: 1 !important;
+  color: var(--danger-text);
+}
+
+/* ── Brief mode (original chevron chips) ── */
 
 .note-links-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 4px 6px;
 }
 
 .note-link-chip {
@@ -272,11 +371,57 @@ function onDrop(idx: number) {
   z-index: 1;
 }
 
-.link-drop-indicator.top {
-  top: -2px;
+.link-drop-indicator.top { top: -2px; }
+.link-drop-indicator.bottom { bottom: -2px; }
+
+/* ── Full mode ── */
+
+.note-links-full {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
 }
 
-.link-drop-indicator.bottom {
-  bottom: -2px;
+.linked-note-wrapper {
+  position: relative;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.linked-note-wrapper > .note-outer {
+  border-left: 3px solid var(--accent);
+}
+
+.linked-note-remove {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 1px 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 2;
+}
+
+.linked-note-wrapper:hover .linked-note-remove {
+  opacity: 0.6;
+}
+
+.linked-note-remove:hover {
+  opacity: 1 !important;
+  color: var(--danger-text);
+}
+
+.linked-note-cycle {
+  font-size: 0.78em;
+  color: var(--text-faint);
+  padding: 4px 8px;
+  font-style: italic;
 }
 </style>

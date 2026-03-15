@@ -7,6 +7,7 @@ import type { StorageBackend } from './interface'
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
 import type { Link } from '../types/link'
+import type { Area } from '../types/area'
 import type { Page, PageSummary } from '../types/page'
 import { nanoid } from 'nanoid'
 
@@ -46,7 +47,7 @@ async function listDir(path: string): Promise<string[]> {
 }
 
 interface MetaFile { version: 1; pages: PageSummary[] }
-interface PageFile { page: Page; notes: Note[]; arrows: Arrow[]; links: Link[] }
+interface PageFile { page: Page; notes: Note[]; arrows: Arrow[]; links: Link[]; areas: Area[] }
 
 export class FileStorage implements StorageBackend {
   private vaultPath: string
@@ -107,6 +108,7 @@ export class FileStorage implements StorageBackend {
       if (!(await exists(this.pageFilePath(pageId)))) return null
       const data = await readJson<PageFile>(this.pageFilePath(pageId))
       if (!data.links) data.links = []  // backward compat
+      if (!data.areas) data.areas = []  // backward compat
       this.pageCache.set(pageId, data)
       return data
     } catch (e) {
@@ -125,7 +127,7 @@ export class FileStorage implements StorageBackend {
     if (existing) return existing
     const empty: PageFile = {
       page: { id: pageId, title: 'Untitled', rootNoteIds: [], nextZIndex: 0, createdAt: Date.now(), updatedAt: Date.now() },
-      notes: [], arrows: [], links: [],
+      notes: [], arrows: [], links: [], areas: [],
     }
     await this.writePageFile(pageId, empty)
     return empty
@@ -136,7 +138,7 @@ export class FileStorage implements StorageBackend {
   async savePage(page: Page): Promise<Page> {
     if (!page.id) page.id = nanoid()
     page.updatedAt = Date.now()
-    const file = (await this.readPageFile(page.id)) || { page, notes: [], arrows: [], links: [] }
+    const file = (await this.readPageFile(page.id)) || { page, notes: [], arrows: [], links: [], areas: [] }
     file.page = page
     await this.writePageFile(page.id, file)
     const idx = this.meta.pages.findIndex(p => p.id === page.id)
@@ -265,22 +267,41 @@ export class FileStorage implements StorageBackend {
 
   async getLinksForPage(pageId: string) { return (await this.readPageFile(pageId))?.links || [] }
 
-  async exportAll() {
-    const pages: Page[] = [], notes: Note[] = [], arrows: Arrow[] = [], links: Link[] = []
-    for (const ps of this.meta.pages) { const f = await this.readPageFile(ps.id); if (!f) continue; pages.push(f.page); notes.push(...f.notes); arrows.push(...f.arrows); links.push(...f.links) }
-    return { pages, notes, arrows, links }
+  // Areas
+  async saveArea(area: Area): Promise<Area> {
+    if (!area.id) area.id = nanoid()
+    area.updatedAt = Date.now()
+    const file = await this.ensurePageFile(area.pageId)
+    const idx = file.areas.findIndex(a => a.id === area.id)
+    if (idx >= 0) file.areas[idx] = area; else file.areas.push(area)
+    await this.writePageFile(area.pageId, file)
+    return area
   }
 
-  async importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: Link[] }) {
+  async deleteArea(id: string) {
+    for (const [pid, cached] of this.pageCache) { const i = cached.areas.findIndex(a => a.id === id); if (i >= 0) { cached.areas.splice(i, 1); await this.writePageFile(pid, cached); return } }
+    for (const ps of this.meta.pages) { const f = await this.readPageFile(ps.id); if (!f) continue; const i = f.areas.findIndex(a => a.id === id); if (i >= 0) { f.areas.splice(i, 1); await this.writePageFile(ps.id, f); return } }
+  }
+
+  async getAreasForPage(pageId: string) { return (await this.readPageFile(pageId))?.areas || [] }
+
+  async exportAll() {
+    const pages: Page[] = [], notes: Note[] = [], arrows: Arrow[] = [], links: Link[] = [], areas: Area[] = []
+    for (const ps of this.meta.pages) { const f = await this.readPageFile(ps.id); if (!f) continue; pages.push(f.page); notes.push(...f.notes); arrows.push(...f.arrows); links.push(...f.links); areas.push(...f.areas) }
+    return { pages, notes, arrows, links, areas }
+  }
+
+  async importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: Link[]; areas?: Area[] }) {
     for (const ps of this.meta.pages) { try { await removeFile(this.pageFilePath(ps.id)) } catch {} }
     this.pageCache.clear()
-    const notesByPage = new Map<string, Note[]>(); const arrowsByPage = new Map<string, Arrow[]>(); const linksByPage = new Map<string, Link[]>()
+    const notesByPage = new Map<string, Note[]>(); const arrowsByPage = new Map<string, Arrow[]>(); const linksByPage = new Map<string, Link[]>(); const areasByPage = new Map<string, Area[]>()
     for (const n of data.notes) { const l = notesByPage.get(n.pageId) || []; l.push(n); notesByPage.set(n.pageId, l) }
     for (const a of data.arrows) { const l = arrowsByPage.get(a.pageId) || []; l.push(a); arrowsByPage.set(a.pageId, l) }
     for (const lk of (data.links || [])) { const l = linksByPage.get(lk.pageId) || []; l.push(lk); linksByPage.set(lk.pageId, l) }
+    for (const ar of (data.areas || [])) { const l = areasByPage.get(ar.pageId) || []; l.push(ar); areasByPage.set(ar.pageId, l) }
     const summaries: PageSummary[] = []
     for (const page of data.pages) {
-      await this.writePageFile(page.id, { page, notes: notesByPage.get(page.id) || [], arrows: arrowsByPage.get(page.id) || [], links: linksByPage.get(page.id) || [] })
+      await this.writePageFile(page.id, { page, notes: notesByPage.get(page.id) || [], arrows: arrowsByPage.get(page.id) || [], links: linksByPage.get(page.id) || [], areas: areasByPage.get(page.id) || [] })
       summaries.push({ id: page.id, title: page.title, updatedAt: page.updatedAt })
     }
     this.meta = { version: 1, pages: summaries }; await this.writeMeta()

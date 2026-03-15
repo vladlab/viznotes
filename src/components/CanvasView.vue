@@ -107,6 +107,14 @@
       }"
     />
 
+    <!-- Area rectangles (below notes) -->
+    <AreaLayer
+      ref="areaLayerRef"
+      :transformCSS="canvas.transformCSS.value"
+      :panePageId="panePageId"
+      @jumpToArea="jumpToArea"
+    />
+
     <!-- Transformed world -->
     <div
       class="canvas-world"
@@ -162,6 +170,8 @@
         @pointerdown.stop
       >
         <button @click="canvasMenuCreateNote">New note</button>
+        <button @click="canvasMenuCreateSearch">New search node</button>
+        <button @click="canvasMenuCreateArea">New area</button>
         <div class="context-separator" />
         <button @click="canvasMenuGenerateWeek">Insert week view…</button>
       </div>
@@ -185,8 +195,11 @@ import { panes, setActivePane } from '../stores/panes'
 import { settings } from '../stores/settings'
 import { loadUserTheme } from '../utils/themeLoader'
 import { isLocalPath, toFsPath } from '../utils/platform'
+import { createDefaultArea } from '../types/area'
+import type { Area } from '../types/area'
 import NoteComponent from './NoteComponent.vue'
 import ArrowLayer from './ArrowLayer.vue'
+import AreaLayer from './AreaLayer.vue'
 
 const props = defineProps<{
   paneId: string
@@ -213,6 +226,7 @@ const fileReplaceTargetId = ref<string | null>(null)
 const canvasMenuVisible = ref(false)
 const canvasMenuPos = ref({ x: 0, y: 0 })
 const canvasMenuRef = ref<HTMLElement | null>(null)
+const areaLayerRef = ref<InstanceType<typeof AreaLayer> | null>(null)
 
 import { toastMessage, showToast } from '../stores/toast'
 const canvasMenuWorldPos = ref({ x: 0, y: 0 })
@@ -632,6 +646,46 @@ function canvasMenuCreateNote() {
   appStore.createNote(pos)
 }
 
+function canvasMenuCreateSearch() {
+  const pos = { ...canvasMenuWorldPos.value }
+  closeCanvasMenu()
+  appStore.createNote(pos, undefined, {
+    initialText: '',
+    nodeType: 'search',
+    startEditing: true,
+  })
+}
+
+async function canvasMenuCreateArea() {
+  const pos = { ...canvasMenuWorldPos.value }
+  closeCanvasMenu()
+  if (!panePage.value) return
+  const storage = getStorage()
+  const area = createDefaultArea(panePage.value.id, pos)
+  const saved = await storage.saveArea(area)
+  appStore.areas.set(saved.id, saved)
+}
+
+function jumpToArea(area: Area) {
+  const vw = containerWidth.value
+  const vh = containerHeight.value
+  const pad = 40
+
+  const fitScale = Math.min(
+    (vw - pad * 2) / area.width,
+    (vh - pad * 2) / area.height,
+    1
+  )
+  const scale = Math.max(0.1, fitScale)
+  const cx = area.pos.x + area.width / 2
+  const cy = area.pos.y + area.height / 2
+
+  canvas.transform.scale = scale
+  canvas.transform.x = vw / 2 - cx * scale
+  canvas.transform.y = vh / 2 - cy * scale
+  zoomToFitActive.value = false
+}
+
 async function canvasMenuGenerateWeek() {
   const pos = { ...canvasMenuWorldPos.value }
   closeCanvasMenu()
@@ -813,6 +867,14 @@ function onKeyDown(e: KeyboardEvent) {
         e.preventDefault()
         const noteId = Array.from(appStore.selectedNoteIds)[0]
         appStore.startLinking(noteId)
+      }
+      break
+
+    case '1': case '2': case '3': case '4': case '5':
+    case '6': case '7': case '8': case '9':
+      if (!isCtrl) {
+        e.preventDefault()
+        areaLayerRef.value?.jumpToNumber(parseInt(e.key))
       }
       break
   }

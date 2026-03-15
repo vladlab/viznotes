@@ -1,6 +1,7 @@
 import type { Note } from '../types/note'
 import type { Arrow } from '../types/arrow'
 import type { Link } from '../types/link'
+import type { Area } from '../types/area'
 import type { Page, PageSummary } from '../types/page'
 
 export interface StorageBackend {
@@ -33,9 +34,14 @@ export interface StorageBackend {
   deleteLinks(ids: string[]): Promise<void>
   getLinksForPage(pageId: string): Promise<Link[]>
 
+  // Areas
+  saveArea(area: Area): Promise<Area>
+  deleteArea(id: string): Promise<void>
+  getAreasForPage(pageId: string): Promise<Area[]>
+
   // Bulk
-  exportAll(): Promise<{ pages: Page[]; notes: Note[]; arrows: Arrow[]; links: Link[] }>
-  importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: Link[] }): Promise<void>
+  exportAll(): Promise<{ pages: Page[]; notes: Note[]; arrows: Arrow[]; links: Link[]; areas: Area[] }>
+  importAll(data: { pages: Page[]; notes: Note[]; arrows: Arrow[]; links?: Link[]; areas?: Area[] }): Promise<void>
 
   // Vault
   getVaultPath(): string

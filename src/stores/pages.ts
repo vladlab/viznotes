@@ -82,8 +82,9 @@ export async function loadPage(pageId: string, targetPaneId?: string) {
       const pageNotes = await storage.getNotesForPage(pageId)
       const pageArrows = await storage.getArrowsForPage(pageId)
       const pageLinks = await storage.getLinksForPage(pageId)
+      const pageAreas = await storage.getAreasForPage(pageId)
 
-      loadPageData(page, pageNotes, pageArrows, pageLinks)
+      loadPageData(page, pageNotes, pageArrows, pageLinks, pageAreas)
 
       // Compact z-indexes for this page's notes
       const sorted = pageNotes.sort((a, b) => a.zIndex - b.zIndex)
