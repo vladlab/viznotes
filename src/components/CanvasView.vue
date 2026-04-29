@@ -235,6 +235,7 @@ let lastDragClientY = 0
 const containerWidth = ref(800)
 const containerHeight = ref(600)
 const zoomToFitActive = ref(false)
+const preJumpViewport = ref<{ x: number; y: number; scale: number } | null>(null)
 
 const scrollMode = computed(() => settings.scrollMode)
 
@@ -667,6 +668,13 @@ async function canvasMenuCreateArea() {
 }
 
 function jumpToArea(area: Area) {
+  // Save current viewport for 'b' to return to
+  preJumpViewport.value = {
+    x: canvas.transform.x,
+    y: canvas.transform.y,
+    scale: canvas.transform.scale,
+  }
+
   const vw = containerWidth.value
   const vh = containerHeight.value
   const pad = 40
@@ -875,6 +883,16 @@ function onKeyDown(e: KeyboardEvent) {
       if (!isCtrl) {
         e.preventDefault()
         areaLayerRef.value?.jumpToNumber(parseInt(e.key))
+      }
+      break
+
+    case 'b':
+      if (!isCtrl && preJumpViewport.value) {
+        e.preventDefault()
+        canvas.transform.x = preJumpViewport.value.x
+        canvas.transform.y = preJumpViewport.value.y
+        canvas.transform.scale = preJumpViewport.value.scale
+        preJumpViewport.value = null
       }
       break
   }

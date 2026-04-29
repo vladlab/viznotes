@@ -45,6 +45,8 @@ export async function createNote(
     startEditing?: boolean;
     bodyText?: string;
     enableBody?: boolean;
+    enableContainer?: boolean;
+    containerLayout?: 'list' | 'columns';
     collapsed?: boolean;
     link?: string;
     nodeType?: string;
@@ -102,6 +104,14 @@ export async function createNote(
   // Set node type
   if (options?.nodeType) {
     note.nodeType = options.nodeType
+  }
+
+  // Set container
+  if (options?.enableContainer) {
+    note.container.enabled = true
+    if (options.containerLayout) {
+      note.container.layout = options.containerLayout
+    }
   }
 
   const saved = await storage.saveNote(note)

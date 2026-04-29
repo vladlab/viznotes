@@ -479,10 +479,8 @@ function addToContainer() {
     appStore.createNote({ x: 0, y: 0 }, props.note.id, {
       startEditing: true,
       enableBody: false,
-    }).then(note => {
-      note.container.enabled = true
-      note.container.layout = 'list'
-      appStore.updateNote(note)
+      enableContainer: true,
+      containerLayout: 'list',
     })
   } else {
     appStore.createNote({ x: 0, y: 0 }, props.note.id)
